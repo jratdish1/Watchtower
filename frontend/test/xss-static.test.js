@@ -1,7 +1,9 @@
 /**
  * FE-XSS-01 static guard (zero-dependency): every ${...} interpolation inside an
  * innerHTML template literal or an actionButtons/killBtn/selectOpts HTML fragment must be
- * escHtml(...) or a reviewed constant/computed-safe expression. No inline on*="" handler
+ * wholly wrapped in escHtml(...) or a reviewed constant/computed-safe expression.
+ * A call counts as wrapped only when the ')' matching the opening escHtml( is the
+ * final token — concatenation after that paren is not safe. No inline on*="" handler
  * may be built from interpolated data.
  *
  * Run: node frontend/test/xss-static.test.js
@@ -68,6 +70,43 @@ function interpolations(tpl) {
   return out;
 }
 
+// Wholly escHtml-wrapped: the ')' that matches the opening escHtml( must be the
+// final token. Parens and other characters inside string literals do not close
+// the call. Anything after that matched ')' (concatenation, member access, a
+// second call) is rejected — e.g. escHtml(event.title) + String(event.file_path).
+function isEscHtmlWrapped(expr) {
+  const open = 'escHtml(';
+  if (!expr.startsWith(open)) return false;
+  let i = open.length;
+  let depth = 1;
+  while (i < expr.length) {
+    const c = expr[i];
+    if (c === "'" || c === '"' || c === '`') {
+      const q = c;
+      i++;
+      while (i < expr.length) {
+        if (expr[i] === '\\') { i += 2; continue; }
+        if (expr[i] === q) { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    if (c === '(') depth++;
+    else if (c === ')') {
+      depth--;
+      if (depth === 0) return expr.slice(i + 1).trim() === '';
+    }
+    i++;
+  }
+  return false;
+}
+
+const partialWrap = 'escHtml(event.title) + String(event.file_path)';
+check(
+  'partial escHtml wrap is rejected (matching ) must be the final token)',
+  /^escHtml\(/.test(partialWrap) && partialWrap.endsWith(')') && !isEscHtmlWrapped(partialWrap)
+);
+
 // Template literals that produce HTML: assigned to innerHTML, or html fragment variables.
 const tplRe = /(innerHTML\s*\+?=\s*|actionButtons\s*\+?=\s*|killBtn\s*=[^`]*?|selectOpts\s*\+?=\s*)`((?:\\`|\$\{(?:[^{}]|\{[^{}]*\})*\}|[^`])*)`/g;
 let tplCount = 0;
@@ -75,7 +114,7 @@ const offenders = [];
 for (const m of js.matchAll(tplRe)) {
   tplCount++;
   for (const expr of interpolations(m[2])) {
-    if (/^escHtml\(/.test(expr) && expr.endsWith(')')) continue;
+    if (isEscHtmlWrapped(expr)) continue;
     if (SAFE.has(expr)) continue;
     offenders.push(expr);
   }
