@@ -298,12 +298,19 @@
             <button onclick="openInfraModal()" style="background:rgba(16, 185, 129, 0.1); border:1px solid var(--success); color:var(--success); font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">🗺️ Infrastructure</button>
         </h1>
         <div class="status-container">
-            <div class="status-indicator" id="connection-status-box">
-                <div class="pulse" id="connection-pulse"></div>
-                <span id="connection-status">DISCONNECTED</span>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <button id="fe-pause-btn" onclick="toggleOperatorPause()" title="Operator pause (local)" style="background:rgba(245,158,11,0.1); border:1px solid var(--warning); color:var(--warning); font-family:'Fira Code'; font-size:0.65rem; padding:6px 10px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold;">Pause</button>
+                <div class="status-indicator" id="connection-status-box" data-state="conn.offline_initial" data-state-at="">
+                    <div class="pulse" id="connection-pulse"></div>
+                    <span id="connection-status">DISCONNECTED</span>
+                </div>
             </div>
+            <div id="connection-meta">state: offline_initial · TIME UNKNOWN</div>
         </div>
     </header>
+
+    <div id="fe-global-banner" role="status" aria-live="polite"></div>
+    <div id="fe-toast-stack" aria-live="assertive"></div>
 
     <!-- COLUMN 1: Main Content Loop -->
     <div class="main-col">
@@ -333,6 +340,10 @@
                 </div>
             </div>
             <div class="panel-content">
+                <div id="mesh-empty" class="empty-state">
+                    <div style="font-size:1rem; color:#fff; margin-bottom:6px;">[MESH]</div>
+                    <div id="mesh-empty-subtext" style="font-size:0.8rem;">SCANNING NODE FLEET…</div>
+                </div>
                 <div id="mesh-grid"></div>
             </div>
         </div>
@@ -346,6 +357,10 @@
                 </div>
             </div>
             <div class="panel-content">
+                <div id="inv-empty" class="empty-state">
+                    <div style="font-size:1rem; color:#fff; margin-bottom:6px;">[INVENTORY]</div>
+                    <div id="inv-empty-subtext" style="font-size:0.8rem;">LOADING INVENTORY…</div>
+                </div>
                 <div id="inv-grid" style="display:flex; flex-direction:column; gap:8px;"></div>
             </div>
         </div>
@@ -784,7 +799,7 @@
                 return;
             }
             if (ok) {
-                showToast('success', 'C2 OK: ' + (payload.action || payload.command || 'result') + ' @ ' + formatStamp(payload.ts || payload.received_at || new Date().toISOString()).display);
+                showToast('success', 'C2 OK: ' + (payload.action || payload.command || 'result') + ' @ ' + formatStamp(payload.ts || payload.received_at || null).display);
             } else {
                 lastErrorAt = new Date().toISOString();
                 showToast('error', 'C2 FAIL: ' + (payload && (payload.error || payload.message || JSON.stringify(payload))) );
