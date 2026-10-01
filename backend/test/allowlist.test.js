@@ -165,6 +165,59 @@ test('OTA ALL allowed only with Exact-GO flag', () => {
   assert.strictEqual(d, null);
 });
 
+
+test('omit group from override revokes (no DEFAULT_SEED retain)', () => {
+  // Simulate production override that only maps Default — Ops-Fleet must NOT fall open
+  allowlist.setConfigForTests({
+    host_group_to_profiles: { Default: ['UNMAPPED'] },
+    ota: { allow_all: false },
+    c2: { destructive_actions: [], audit_blocked_actions: ['kill'] },
+  });
+  process.env.WATCHTOWER_OPERATOR_PROFILE_ID = 'GitHub vets-ops';
+  const d = allowlist.assertMappedGroup('Ops-Fleet');
+  assert.ok(d);
+  assert.strictEqual(d.rule, 'DENY_UNMAPPED_GROUP');
+  const d2 = allowlist.assertProfileAllowed('Builder-Lab', 'Hermes vets-developer');
+  assert.ok(d2);
+  assert.strictEqual(d2.rule, 'DENY_UNMAPPED_GROUP');
+});
+
+test('path miss fail-closed empty map (no illustrative fall-open)', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const p = path.join(os.tmpdir(), 'watchtower-allowlist-missing-' + process.pid + '.json');
+  try { fs.unlinkSync(p); } catch (_) {}
+  process.env.WATCHTOWER_ALLOWLIST_PATH = p;
+  allowlist.resetForTests();
+  const cfg = allowlist.loadConfig(true);
+  assert.deepStrictEqual(cfg.host_group_to_profiles, {});
+  process.env.WATCHTOWER_OPERATOR_PROFILE_ID = 'GitHub vets-ops';
+  const d = allowlist.assertMappedGroup('Ops-Fleet');
+  assert.ok(d);
+  assert.strictEqual(d.rule, 'DENY_UNMAPPED_GROUP');
+  delete process.env.WATCHTOWER_ALLOWLIST_PATH;
+  allowlist.resetForTests();
+});
+
+test('bad profile shape fail-closed (no throw on assert)', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const p = path.join(os.tmpdir(), 'watchtower-allowlist-badshape-' + process.pid + '.json');
+  fs.writeFileSync(p, JSON.stringify({ host_group_to_profiles: { 'Ops-Fleet': 'GitHub vets-ops' } }));
+  process.env.WATCHTOWER_ALLOWLIST_PATH = p;
+  allowlist.resetForTests();
+  const cfg = allowlist.loadConfig(true);
+  assert.deepStrictEqual(cfg.host_group_to_profiles, {});
+  process.env.WATCHTOWER_OPERATOR_PROFILE_ID = 'GitHub vets-ops';
+  // Must not throw — deny instead of 500
+  const d = allowlist.assertProfileAllowed('Ops-Fleet', 'GitHub vets-ops');
+  assert.ok(d);
+  assert.strictEqual(d.rule, 'DENY_UNMAPPED_GROUP');
+  fs.unlinkSync(p);
+  delete process.env.WATCHTOWER_ALLOWLIST_PATH;
+  allowlist.resetForTests();
+});
+
 console.log(`\n${PASS.length} passed, ${FAIL.length} failed`);
 if (FAIL.length) {
   process.exitCode = 1;
