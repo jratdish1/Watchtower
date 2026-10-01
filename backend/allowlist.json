@@ -1,0 +1,15 @@
+{
+  "_comment": "PAPER SEED only — Escalation CALL (A) adapter. Default=UNMAPPED. Illustrative examples from WATCHTOWER_BE_ALLOWLIST-20261001.md §3. Do NOT invent live Hermes/GitHub production binds here.",
+  "host_group_to_profiles": {
+    "Default": ["UNMAPPED"],
+    "Ops-Fleet": ["GitHub vets-ops"],
+    "Builder-Lab": ["GitHub vets-builder", "Hermes vets-developer"]
+  },
+  "ota": {
+    "allow_all": false
+  },
+  "c2": {
+    "destructive_actions": ["kill", "lock_dir", "quarantine", "disable_user"],
+    "audit_blocked_actions": ["kill"]
+  }
+}
