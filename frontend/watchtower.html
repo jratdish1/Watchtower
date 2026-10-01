@@ -387,26 +387,6 @@
     <div class="modal-overlay" id="ota-modal">
         <div class="modal-content" style="max-width: 600px; text-align:center;">
             <div class="modal-header">
-                <h2>OVER-THE-AIR (OTA) FLEET DEPLOYMENT</h2>
-                <button class="close-btn" onclick="document.getElementById('ota-modal').classList.remove('active')">&#x2715;</button>
-            </div>
-            <p style="color:var(--text-dim); margin-bottom:20px; font-size:0.9rem;">Upload a compressed <span style="color:var(--warning)">core.zip</span> to autonomously patch and securely restart remote endpoints via HMAC validation.</p>
-            
-            <div style="margin-bottom:20px; text-align:left;">
-                <label style="color:var(--text-dim); font-size:0.8rem; text-transform:uppercase;">Target Host Group:</label>
-                <select id="ota-group-select" style="width:100%; padding:10px; margin-top:8px; background:#000; color:#fff; border:1px solid var(--border); border-radius:6px; font-family:'Fira Code'; font-size:0.85rem; outline:none; cursor:pointer;">
-                </select>
-            </div>
-
-            <div style="border: 2px dashed var(--border); border-radius:12px; padding:40px; background:rgba(0,0,0,0.3); margin-bottom: 20px;">
-                <input type="file" id="ota-file-input" accept=".zip" style="display:none;" onchange="updateOtaLabel()">
-                <label for="ota-file-input" style="cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:16px;">
-                    <span style="font-size:2rem;">📦</span>
-                    <span id="ota-file-label" style="font-family:'Fira Code'; font-weight:bold; color:var(--accent);">Select core.zip payload...</span>
-                </label>
-            </div>
-            
-            <button onclick="deployOta()" id="ota-deploy-btn" style="width:100%; padding:12px; background:var(--warning); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer; text-transform:uppercase; transition:all 0.2s;">Transmit OTA Payload</button>
         </div>
     </div>
     <!-- Infrastructure Modal -->
@@ -441,8 +421,8 @@
     </div>
 
     <script>
-        const API_PORT = '4040'; 
-        const socket = io('http://' + window.location.hostname + ':' + API_PORT, {
+        const API_PORT = "443"; // proxied through nginx
+        const socket = io(window.location.origin, {path: "/socket.io/"})
             auth: { token: "YOUR_SECRET_API_KEY_HERE" }
         });
         
@@ -803,7 +783,7 @@
             if(!ip || !user || !pass) return alert("Fill all fields.");
             
             try {
-                const res = await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/infrastructure`, {
+                const res = await fetch(`/api/v2/infrastructure`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
                     body: JSON.stringify({ ip, username: user, password: pass, type: 'switch', protocol: 'ssh' })
@@ -819,7 +799,7 @@
         
         async function fetchTopology() {
             try {
-                const res = await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/topology`, {
+                const res = await fetch(`/api/v2/topology`, {
                     headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'}
                 });
                 const data = await res.json();
@@ -854,7 +834,7 @@
         async function clearInfrastructure() {
             if(!confirm("Erase all securely vaulted SSH Switch Credentials?")) return;
             try {
-                await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/infrastructure`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
+                await fetch(`/api/v2/infrastructure`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
                 alert("Credentials Purged.");
             } catch(e) {}
         }
@@ -862,7 +842,7 @@
         async function clearTopology() {
             if(!confirm("Erase network topology maps and baseline history?")) return;
             try {
-                await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/topology`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
+                await fetch(`/api/v2/topology`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
                 fetchTopology();
             } catch(e) {}
         }
@@ -900,7 +880,7 @@
             const buffer = await file.arrayBuffer();
             
             try {
-                const res = await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/ota/upload?group=${group}`, {
+                const res = await fetch(`/api/v2/ota/upload?group=${group}`, {
                     method: 'POST',
                     headers: { 'x-api-key': 'YOUR_SECRET_API_KEY_HERE', 'Content-Type': 'application/zip' },
                     body: buffer
@@ -983,7 +963,7 @@
         }
         
         function reassignHost(host, newGroup) {
-            fetch('http://' + window.location.hostname + ':' + API_PORT + '/api/v2/policies/update', {
+            fetch('/api/v2/policies/update', {
                 method: 'POST', headers:{'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
                 body: JSON.stringify({ host: host, newGroup: newGroup })
             });
@@ -995,7 +975,7 @@
             keys.forEach(k => {
                 newPol[k] = document.getElementById('pol-'+k).checked;
             });
-            fetch('http://' + window.location.hostname + ':' + API_PORT + '/api/v2/policies/update', {
+            fetch('/api/v2/policies/update', {
                 method: 'POST', headers:{'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
                 body: JSON.stringify({ group: activePolicyGroup, policy: newPol })
             }).then(() => {
