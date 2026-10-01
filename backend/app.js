@@ -50,6 +50,8 @@ app.use((req, res, next) => {
 const fs = require('fs');
 const path = require('path');
 
+const allowlist = require('./allowlist');
+
 const DB_FILE = process.env.WATCHTOWER_DB_PATH || path.join(__dirname, '../data/watchtower_db.json');
 if (!fs.existsSync(path.dirname(DB_FILE))) {
     fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
@@ -132,6 +134,22 @@ io.on('connection', (socket) => {
     
     socket.on('c2_command', (cmd) => {
     console.log(`[C2 COMMAND RECEIVED] Action: ${cmd.action}, Target: ${cmd.target}, Host: ${cmd.host}`);
+
+    // Allowlist adapter: host-scoped deny for unmapped/missing/wrong-profile/audit
+    if (allowlist.isEnabled()) {
+        const deny = allowlist.assertC2Command(cmd, deviceGroupMap, groupDB);
+        if (deny) {
+            console.warn(`[C2 ALLOWLIST DENY] ${deny.rule} host=${cmd && cmd.host}`);
+            socket.emit('c2_result', {
+                action: cmd && cmd.action,
+                target: cmd && cmd.target,
+                host: cmd && cmd.host,
+                result: allowlist.socketDenyPayload(deny),
+                allowlist_denied: true
+            });
+            return;
+        }
+    }
     
     // If it's a remote host, queue it for the beacon
     if (cmd.host && cmd.host !== 'mac-mini-hub' && cmd.host !== 'Local-Node' && cmd.host !== 'localhost' && cmd.host !== 'Austins-Mac-mini.local') {
@@ -347,6 +365,17 @@ app.get('/api/v2/policies/sync', authenticate, (req, res) => {
 
 app.post('/api/v2/policies/update', authenticate, (req, res) => {
     const { group, policy, host, newGroup } = req.body;
+
+    // Allowlist adapter (CALL A): fail-closed when WATCHTOWER_ALLOWLIST enabled (default ON)
+    if (allowlist.isEnabled()) {
+        if (host && newGroup) {
+            const deny = allowlist.assertReassign(host, newGroup, deviceGroupMap);
+            if (allowlist.sendHttpDeny(res, deny)) return;
+        } else if (group && policy) {
+            const deny = allowlist.assertPolicyGroupWrite(group, groupDB);
+            if (allowlist.sendHttpDeny(res, deny)) return;
+        }
+    }
     
     if (host && newGroup) {
         if (!groupDB[newGroup]) groupDB[newGroup] = {...groupDB["Default"]};
@@ -377,6 +406,11 @@ app.post('/api/v2/policies/update', authenticate, (req, res) => {
 app.post('/api/v2/ota/upload', authenticate, (req, res) => {
     const groupName = req.query.group;
     if (!groupName) return res.status(400).json({ error: 'Group parameter required' });
+
+    if (allowlist.isEnabled()) {
+        const deny = allowlist.assertOtaGroup(groupName);
+        if (allowlist.sendHttpDeny(res, deny)) return;
+    }
 
     const otaDir = __dirname + '/updates';
     if (!fs.existsSync(otaDir)) fs.mkdirSync(otaDir, { recursive: true });
@@ -502,4 +536,5 @@ server.on('error', (e) => {
 server.listen(port, BIND_ADDRESS, () => {
     console.log(`[Watchtower Command Center API] Server listening on http://${BIND_ADDRESS}:${port}`);
     console.log(`[Watchtower Command Center API] WebSocket Server attached.`);
+    console.log(`[Watchtower Allowlist] enabled=${allowlist.isEnabled()} operator_profile=${allowlist.getOperatorProfileId() || '(unset → fail-closed)'}`);
 });
