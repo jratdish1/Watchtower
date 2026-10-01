@@ -261,6 +261,31 @@
             background: #09090b; padding: 20px; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word;
             font-family: 'Fira Code', monospace; font-size: 0.85rem; color: var(--text-dim); border: 1px solid var(--border);
         }
+
+        /* FE STATES 20261001 — connection + toast + banner */
+        .status-indicator.loading { color: var(--accent); background: rgba(56,189,248,0.08); border-color: rgba(56,189,248,0.35); }
+        .status-indicator.loading .pulse { background-color: var(--accent); box-shadow: 0 0 10px var(--accent); animation: blink 0.8s infinite; }
+        .status-indicator.error, .status-indicator.blocked { color: var(--danger); background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.4); }
+        .status-indicator.error .pulse, .status-indicator.blocked .pulse { background-color: var(--danger); box-shadow: 0 0 10px var(--danger); animation: none; opacity: 1; }
+        .status-indicator.paused { color: var(--warning); background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.4); }
+        .status-indicator.paused .pulse { background-color: var(--warning); box-shadow: 0 0 10px var(--warning); animation: blink 3s infinite; }
+        .status-indicator.offline { color: var(--warning); background: rgba(245,158,11,0.05); border-color: rgba(245,158,11,0.3); }
+        .status-indicator.offline .pulse { background-color: var(--warning); animation: none; opacity: 0.5; }
+        #connection-meta { font-family: 'Fira Code', monospace; font-size: 0.65rem; color: var(--text-dim); margin-top: 4px; max-width: 420px; text-align: right; }
+        #fe-global-banner { display:none; grid-column: 1 / -1; font-family:'Fira Code',monospace; font-size:0.75rem; padding:8px 14px; border-radius:8px; border:1px solid var(--border); }
+        #fe-global-banner.visible { display:block; }
+        #fe-global-banner.offline { background:rgba(245,158,11,0.1); border-color:rgba(245,158,11,0.4); color:var(--warning); }
+        #fe-global-banner.paused { background:rgba(245,158,11,0.12); border-color:rgba(245,158,11,0.5); color:var(--warning); }
+        #fe-global-banner.blocked { background:rgba(239,68,68,0.12); border-color:rgba(239,68,68,0.5); color:var(--danger); }
+        #fe-global-banner.error { background:rgba(239,68,68,0.1); border-color:rgba(239,68,68,0.4); color:var(--danger); }
+        #fe-toast-stack { position:fixed; bottom:20px; right:20px; z-index:9999; display:flex; flex-direction:column; gap:8px; max-width:420px; }
+        .fe-toast { font-family:'Fira Code',monospace; font-size:0.75rem; padding:10px 14px; border-radius:8px; border:1px solid var(--border); background:rgba(18,20,28,0.95); color:#fff; box-shadow:0 8px 24px rgba(0,0,0,0.45); }
+        .fe-toast.error, .fe-toast.blocked { border-color:rgba(239,68,68,0.5); color:var(--danger); }
+        .fe-toast.success { border-color:rgba(16,185,129,0.5); color:var(--success); }
+        .fe-toast.warn { border-color:rgba(245,158,11,0.5); color:var(--warning); }
+        button.mutate-disabled, .mutate-disabled { opacity:0.45 !important; pointer-events:none !important; cursor:not-allowed !important; }
+        #mesh-empty, #inv-empty { position:relative; min-height:80px; }
+        .panel-content { position: relative; }
     </style>
 </head>
 <body>
@@ -268,7 +293,7 @@
     <header>
         <h1>
             Watchtower Command
-            <button onclick="openOtaModal()" style="background:rgba(255, 100, 0, 0.1); border:1px solid #ff6400; color:#ff6400; font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">🚀 Deploy OTA</button>
+            <button data-mutate="1" onclick="openOtaModal()" style="background:rgba(255, 100, 0, 0.1); border:1px solid #ff6400; color:#ff6400; font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">🚀 Deploy OTA</button>
             <button onclick="openPolicyModal()" style="background:rgba(0,240,255,0.1); border:1px solid var(--accent); color:var(--accent); font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">⚙️ Fleet Policies</button>
             <button onclick="openInfraModal()" style="background:rgba(16, 185, 129, 0.1); border:1px solid var(--success); color:var(--success); font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">🗺️ Infrastructure</button>
         </h1>
@@ -290,8 +315,8 @@
             </div>
             <div class="panel-content" id="alert-matrix-container">
                 <div id="alert-matrix-empty" class="empty-state">
-                    <div style="font-size: 1.2rem; color: #fff; margin-bottom: 8px;">[SYSTEM NOMINAL]</div>
-                    <div style="font-size: 0.85rem;" id="empty-subtext">AWAITING SECURITY TELEMETRY...</div>
+                    <div style="font-size: 1.2rem; color: #fff; margin-bottom: 8px;" id="matrix-empty-title">[SYSTEM NOMINAL]</div>
+                    <div style="font-size: 0.85rem;" id="empty-subtext">LOADING TELEMETRY…</div>
                 </div>
                 <div id="alert-matrix">
                     <!-- Alerts go here -->
@@ -331,7 +356,8 @@
         <div class="panel-header">Cognitive Engine [Local AI]</div>
         <div class="panel-content" id="cognitive-stream-container">
             <div id="stream-empty" class="empty-state">
-                <div>[AI DORMANT]</div>
+                <div id="stream-empty-title">[AI DORMANT]</div>
+                <div id="stream-empty-subtext" style="font-size:0.8rem; margin-top:6px;">LOADING TELEMETRY…</div>
             </div>
             <div id="cognitive-stream">
                 <!-- Stream events go here -->
@@ -362,7 +388,7 @@
                     <h3 style="color:var(--text-dim); font-size:0.8rem; text-transform:uppercase;">Host Groups</h3>
                     <div id="group-list" style="display:flex; flex-direction:column; gap:8px; margin-top:12px;"></div>
                     <input type="text" id="new-group-name" class="search-bar" placeholder="New Group..." style="margin-top:16px;">
-                    <button onclick="createGroup()" style="width:100%; padding:8px; margin-top:8px; background:var(--accent); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">+ Create Group</button>
+                    <button data-mutate="1" onclick="createGroup()" style="width:100%; padding:8px; margin-top:8px; background:var(--accent); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">+ Create Group</button>
                 </div>
                 
                 <div style="flex: 1.5; padding: 20px; overflow-y:auto;">
@@ -370,7 +396,7 @@
                     <div id="policy-toggles" style="display:flex; flex-direction:column; gap:16px; margin-top:20px;">
                         <!-- Toggles rendered dynamically -->
                     </div>
-                    <button onclick="savePolicy()" style="width:100%; padding:12px; margin-top:32px; background:var(--success); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Deploy Policy to Group</button>
+                    <button data-mutate="1" id="fe-save-policy-btn" onclick="savePolicy()" style="width:100%; padding:12px; margin-top:32px; background:var(--success); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Deploy Policy to Group</button>
                 </div>
                 
                 <div style="flex: 1.5; border-left: 1px solid var(--border); padding: 20px; overflow-y:auto; background:rgba(0,0,0,0.2);">
@@ -406,7 +432,7 @@
                 </label>
             </div>
             
-            <button onclick="deployOta()" id="ota-deploy-btn" style="width:100%; padding:12px; background:var(--warning); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer; text-transform:uppercase; transition:all 0.2s;">Transmit OTA Payload</button>
+            <button onclick="deployOta()" data-mutate="1" id="ota-deploy-btn" style="width:100%; padding:12px; background:var(--warning); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer; text-transform:uppercase; transition:all 0.2s;">Transmit OTA Payload</button>
         </div>
     </div>
     <!-- Infrastructure Modal -->
@@ -422,7 +448,7 @@
                     <input type="text" id="infra-ip" class="search-bar" placeholder="Switch IP (e.g. 10.1.1.5)">
                     <input type="text" id="infra-user" class="search-bar" placeholder="SSH Username">
                     <input type="password" id="infra-pass" class="search-bar" placeholder="SSH Password / Key Passphrase">
-                    <button onclick="saveInfrastructure()" style="padding:10px; background:var(--success); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Securely Inject Credentials</button>
+                    <button data-mutate="1" onclick="saveInfrastructure()" style="padding:10px; background:var(--success); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Securely Inject Credentials</button>
                 </div>
             </div>
             
@@ -430,8 +456,8 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <h3 style="color:var(--text-dim); font-size:0.8rem; text-transform:uppercase; margin:0;">Discovered Topography Maps</h3>
                     <div style="display:flex; gap:8px;">
-                        <button onclick="clearInfrastructure()" style="background:rgba(255,42,95,0.1); border:1px solid var(--danger); color:var(--danger); padding:4px 8px; border-radius:4px; font-size:0.6rem; cursor:pointer; font-weight:bold;">PURGE VAULT</button>
-                        <button onclick="clearTopology()" style="background:rgba(251,191,36,0.1); border:1px solid var(--warning); color:var(--warning); padding:4px 8px; border-radius:4px; font-size:0.6rem; cursor:pointer; font-weight:bold;">CLEAR MAPS</button>
+                        <button data-mutate="1" onclick="clearInfrastructure()" style="background:rgba(255,42,95,0.1); border:1px solid var(--danger); color:var(--danger); padding:4px 8px; border-radius:4px; font-size:0.6rem; cursor:pointer; font-weight:bold;">PURGE VAULT</button>
+                        <button data-mutate="1" onclick="clearTopology()" style="background:rgba(251,191,36,0.1); border:1px solid var(--warning); color:var(--warning); padding:4px 8px; border-radius:4px; font-size:0.6rem; cursor:pointer; font-weight:bold;">CLEAR MAPS</button>
                     </div>
                 </div>
                 <div id="topo-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:12px; margin-top:12px; max-height: 200px; overflow-y:auto;">
@@ -447,13 +473,18 @@
         // DOM Elements
         const statusBox = document.getElementById('connection-status-box');
         const connectionStatus = document.getElementById('connection-status');
+        const connectionMeta = document.getElementById('connection-meta');
         const matrixEl = document.getElementById('alert-matrix');
         const streamEl = document.getElementById('cognitive-stream');
         const matrixEmpty = document.getElementById('alert-matrix-empty');
         const streamEmpty = document.getElementById('stream-empty');
+        const meshEmpty = document.getElementById('mesh-empty');
+        const invEmpty = document.getElementById('inv-empty');
         const clearFilterBtn = document.getElementById('clear-filter-btn');
         const matrixTitle = document.getElementById('matrix-title');
         const emptySubtext = document.getElementById('empty-subtext');
+        const globalBanner = document.getElementById('fe-global-banner');
+        const toastStack = document.getElementById('fe-toast-stack');
         
         // State Management
         const eventRegistry = {};
@@ -463,30 +494,301 @@
         let appGroups = {};
         let appDeviceGroups = {};
         let activePolicyGroup = "Default";
-        let activeDeviceFilter = null; 
-        
+        let activeDeviceFilter = null;
+        let hasSyncedOnce = false;
+        let operatorPaused = false;
+        let connState = 'conn.offline_initial';
+        let lastSyncAt = null;
+        let lastErrorAt = null;
+        let pausedAt = null;
+        let blockedAt = null;
+        const ALLOWLIST_CODES = {
+            allowlist_unmapped_group: 'GROUP UNMAPPED',
+            allowlist_missing_host_group: 'HOST NOT ENROLLED',
+            allowlist_wrong_profile: 'WRONG PROFILE',
+            allowlist_unknown_group: 'UNKNOWN GROUP',
+            allowlist_ota_all_forbidden: 'OTA ALL FORBIDDEN',
+            allowlist_c2_denied: 'C2 DENIED',
+            allowlist_wrong_group: 'CROSS-GROUP DENIED',
+            allowlist_reassign_unmapped: 'REASSIGN TARGET UNMAPPED',
+            allowlist_purge_denied: 'PURGE DENIED',
+            allowlist_orphan_group: 'ORPHAN GROUP CREATE DENIED'
+        };
+
+        // FE-TS-01: real timestamps — never silent Date.now() for missing stamps
+        function formatStamp(raw) {
+            if (raw === null || raw === undefined || raw === '') {
+                return { iso: 'TIME UNKNOWN', pt: 'TIME UNKNOWN', display: 'TIME UNKNOWN' };
+            }
+            const d = new Date(raw);
+            if (Number.isNaN(d.getTime())) {
+                return { iso: 'TIME UNKNOWN', pt: 'TIME UNKNOWN', display: 'TIME UNKNOWN' };
+            }
+            const iso = d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+            const pt = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'America/Los_Angeles',
+                hour: 'numeric', minute: '2-digit', second: '2-digit',
+                hour12: true, timeZoneName: 'short'
+            }).format(d).replace(/\sGMT-7|\sPDT|\sPST/g, (m) => m.includes('PDT') || m.includes('PST') || m.includes('GMT-7') ? ' PT' : m);
+            // Normalize zone label to PT
+            const ptNorm = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'America/Los_Angeles',
+                hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
+            }).format(d) + ' PT';
+            return { iso, pt: ptNorm, display: iso + ' · ' + ptNorm };
+        }
+
+        function showToast(kind, message) {
+            if (!toastStack) return;
+            const el = document.createElement('div');
+            el.className = 'fe-toast ' + (kind || 'warn');
+            const stamp = formatStamp(new Date().toISOString()).display;
+            el.textContent = '[' + stamp + '] ' + message;
+            toastStack.appendChild(el);
+            setTimeout(() => el.remove(), 8000);
+        }
+
+        function setGlobalBanner(kind, text) {
+            if (!globalBanner) return;
+            if (!kind || !text) {
+                globalBanner.className = '';
+                globalBanner.textContent = '';
+                globalBanner.classList.remove('visible');
+                return;
+            }
+            globalBanner.className = kind + ' visible';
+            globalBanner.textContent = text;
+        }
+
+        function refreshMutateGates() {
+            const blocked = operatorPaused || connState === 'conn.offline' || connState === 'conn.offline_initial' || connState === 'conn.error' || connState === 'conn.blocked' || connState === 'conn.paused';
+            const reason = operatorPaused || connState === 'conn.paused' ? 'PAUSED — mutates disabled'
+                : (connState === 'conn.offline' || connState === 'conn.offline_initial') ? 'OFFLINE — mutates disabled'
+                : connState === 'conn.blocked' ? 'BLOCKED — mutates disabled'
+                : connState === 'conn.error' ? 'ERROR — mutates disabled' : '';
+            document.querySelectorAll('[data-mutate="1"]').forEach(el => {
+                if (blocked) {
+                    el.classList.add('mutate-disabled');
+                    el.setAttribute('title', reason);
+                    if (el.tagName === 'BUTTON') el.disabled = true;
+                } else {
+                    el.classList.remove('mutate-disabled');
+                    el.removeAttribute('title');
+                    if (el.tagName === 'BUTTON') el.disabled = false;
+                }
+            });
+        }
+
+        function canMutate(actionLabel) {
+            if (operatorPaused || connState === 'conn.paused') {
+                showToast('warn', 'PAUSED — cannot ' + (actionLabel || 'mutate'));
+                return false;
+            }
+            if (connState === 'conn.offline' || connState === 'conn.offline_initial') {
+                showToast('warn', 'OFFLINE — cannot ' + (actionLabel || 'mutate'));
+                return false;
+            }
+            if (connState === 'conn.blocked') {
+                showToast('blocked', 'ACCESS BLOCKED — cannot ' + (actionLabel || 'mutate'));
+                return false;
+            }
+            if (connState === 'conn.error') {
+                showToast('error', 'LINK ERROR — cannot ' + (actionLabel || 'mutate'));
+                return false;
+            }
+            return true;
+        }
+
+        function setConnState(stateId, label, opt) {
+            opt = opt || {};
+            connState = stateId;
+            const nowIso = new Date().toISOString();
+            statusBox.setAttribute('data-state', stateId);
+            statusBox.setAttribute('data-state-at', nowIso);
+            statusBox.classList.remove('connected', 'loading', 'error', 'paused', 'blocked', 'offline');
+            if (stateId === 'conn.online') statusBox.classList.add('connected');
+            else if (stateId === 'conn.loading') statusBox.classList.add('loading');
+            else if (stateId === 'conn.error') statusBox.classList.add('error');
+            else if (stateId === 'conn.paused') statusBox.classList.add('paused');
+            else if (stateId === 'conn.blocked') statusBox.classList.add('blocked');
+            else if (stateId === 'conn.offline' || stateId === 'conn.offline_initial') statusBox.classList.add('offline');
+            connectionStatus.textContent = label;
+            const stampSrc = opt.stamp || nowIso;
+            const stamp = formatStamp(stampSrc);
+            const bits = ['state: ' + stateId.replace('conn.', '')];
+            if (lastSyncAt) bits.push('last_sync: ' + formatStamp(lastSyncAt).display);
+            if (lastErrorAt) bits.push('last_error: ' + formatStamp(lastErrorAt).display);
+            if (pausedAt) bits.push('paused_at: ' + formatStamp(pausedAt).display);
+            if (blockedAt) bits.push('blocked_at: ' + formatStamp(blockedAt).display);
+            bits.push('at: ' + stamp.display);
+            if (connectionMeta) connectionMeta.textContent = bits.join(' · ');
+            if (stateId === 'conn.offline') {
+                const syncDisp = lastSyncAt ? formatStamp(lastSyncAt).display : 'TIME UNKNOWN';
+                setGlobalBanner('offline', 'OFFLINE — SHOWING LAST SYNC @ ' + syncDisp);
+            } else if (stateId === 'conn.paused') {
+                setGlobalBanner('paused', 'PAUSED @ ' + formatStamp(pausedAt || nowIso).display);
+            } else if (stateId === 'conn.blocked') {
+                setGlobalBanner('blocked', label + ' @ ' + formatStamp(blockedAt || nowIso).display);
+            } else if (stateId === 'conn.error') {
+                setGlobalBanner('error', label + ' @ ' + formatStamp(lastErrorAt || nowIso).display);
+            } else if (stateId === 'conn.online' || stateId === 'conn.loading') {
+                if (!operatorPaused) setGlobalBanner(null);
+            }
+            refreshMutateGates();
+            updateEmptyStates();
+        }
+
+        function toggleOperatorPause() {
+            operatorPaused = !operatorPaused;
+            const btn = document.getElementById('fe-pause-btn');
+            if (operatorPaused) {
+                pausedAt = new Date().toISOString();
+                if (btn) btn.textContent = 'Resume';
+                setConnState('conn.paused', 'MESH PAUSED // OPERATOR HOLD', { stamp: pausedAt });
+                showToast('warn', 'Operator pause ON @ ' + formatStamp(pausedAt).display);
+            } else {
+                const resumed = new Date().toISOString();
+                if (btn) btn.textContent = 'Pause';
+                pausedAt = null;
+                showToast('success', 'Operator resume @ ' + formatStamp(resumed).display);
+                if (socket.connected && hasSyncedOnce) setConnState('conn.online', 'LINK SECURE // MESH ONLINE', { stamp: lastSyncAt || resumed });
+                else if (socket.connected) setConnState('conn.loading', 'LINKING // AWAITING SYNC…', { stamp: resumed });
+                else setConnState('conn.offline', 'LINK LOST // RECONNECTING', { stamp: resumed });
+            }
+        }
+
+        function extractAllowlistCode(payload) {
+            if (!payload) return null;
+            const code = payload.code || payload.error_code || payload.error || (typeof payload === 'string' ? payload : null);
+            if (code && ALLOWLIST_CODES[code]) return code;
+            if (payload.error && ALLOWLIST_CODES[payload.error]) return payload.error;
+            if (typeof payload.message === 'string') {
+                for (const k of Object.keys(ALLOWLIST_CODES)) {
+                    if (payload.message.indexOf(k) !== -1) return k;
+                }
+            }
+            return null;
+        }
+
+        async function handleAllowlistResponse(res, body) {
+            if (res && res.status === 403) {
+                const code = extractAllowlistCode(body) || 'allowlist_c2_denied';
+                const copy = ALLOWLIST_CODES[code] || 'ALLOWLIST DENIED';
+                blockedAt = new Date().toISOString();
+                setConnState('conn.blocked', 'ACCESS BLOCKED // ALLOWLIST', { stamp: blockedAt });
+                showToast('blocked', 'Blocked — ' + copy + ' (' + code + ')');
+                return true;
+            }
+            if (body && extractAllowlistCode(body)) {
+                const code = extractAllowlistCode(body);
+                const copy = ALLOWLIST_CODES[code];
+                blockedAt = new Date().toISOString();
+                setConnState('conn.blocked', 'ACCESS BLOCKED // ALLOWLIST', { stamp: blockedAt });
+                showToast('blocked', 'Blocked — ' + copy + ' (' + code + ')');
+                return true;
+            }
+            return false;
+        }
+
         function updateEmptyStates() {
+            const loading = !hasSyncedOnce && (connState === 'conn.loading' || connState === 'conn.offline_initial');
+            const offline = connState === 'conn.offline' || connState === 'conn.offline_initial';
+            const matrixTitleEl = document.getElementById('matrix-empty-title');
+            const streamTitle = document.getElementById('stream-empty-title');
+            const streamSub = document.getElementById('stream-empty-subtext');
+            const meshSub = document.getElementById('mesh-empty-subtext');
+            const invSub = document.getElementById('inv-empty-subtext');
+
             if (matrixEl.children.length === 0) {
                 matrixEmpty.style.display = 'flex';
-                if (activeDeviceFilter) {
-                    emptySubtext.innerHTML = `No active network threats detected.<br><span style="color:var(--success); font-weight:bold; font-size:0.9rem; display:inline-block; margin-top:8px;">[ ${activeDeviceFilter} IS SECURE ]</span>`;
+                if (loading) {
+                    if (matrixTitleEl) matrixTitleEl.textContent = '[LOADING]';
+                    emptySubtext.textContent = 'LOADING TELEMETRY…';
+                } else if (offline && !hasSyncedOnce) {
+                    if (matrixTitleEl) matrixTitleEl.textContent = '[OFFLINE]';
+                    emptySubtext.textContent = 'OFFLINE — NO TELEMETRY YET';
+                } else if (activeDeviceFilter) {
+                    if (matrixTitleEl) matrixTitleEl.textContent = '[SYSTEM NOMINAL]';
+                    emptySubtext.innerHTML = `NO ALERTS<br><span style="color:var(--success); font-weight:bold; font-size:0.9rem; display:inline-block; margin-top:8px;">[ ${activeDeviceFilter} IS SECURE ]</span>`;
                 } else {
-                    emptySubtext.textContent = `AWAITING SECURITY TELEMETRY...`;
+                    if (matrixTitleEl) matrixTitleEl.textContent = '[SYSTEM NOMINAL]';
+                    emptySubtext.textContent = hasSyncedOnce ? 'NO ALERTS' : 'AWAITING SECURITY TELEMETRY...';
                 }
             } else {
                 matrixEmpty.style.display = 'none';
             }
-            streamEmpty.style.display = streamEl.children.length === 0 ? 'flex' : 'none';
+
+            if (streamEl.children.length === 0) {
+                streamEmpty.style.display = 'flex';
+                if (streamTitle) streamTitle.textContent = loading ? '[LOADING]' : '[AI DORMANT]';
+                if (streamSub) streamSub.textContent = loading ? 'LOADING TELEMETRY…' : (hasSyncedOnce ? 'NO COGNITIVE EVENTS' : 'LOADING TELEMETRY…');
+            } else {
+                streamEmpty.style.display = 'none';
+            }
+
+            const meshGrid = document.getElementById('mesh-grid');
+            const meshCount = meshGrid ? meshGrid.querySelectorAll('.mesh-node').length : 0;
+            if (meshEmpty) {
+                if (meshCount === 0) {
+                    meshEmpty.style.display = 'flex';
+                    if (meshSub) meshSub.textContent = loading ? 'SCANNING NODE FLEET…' : (hasSyncedOnce ? 'NO MESH NODES ENROLLED' : 'SCANNING NODE FLEET…');
+                } else {
+                    meshEmpty.style.display = 'none';
+                }
+            }
+
+            const invGrid = document.getElementById('inv-grid');
+            const invCount = invGrid ? invGrid.querySelectorAll('.inv-row').length : 0;
+            if (invEmpty) {
+                if (invCount === 0) {
+                    invEmpty.style.display = 'flex';
+                    if (invSub) invSub.textContent = loading ? 'LOADING INVENTORY…' : (hasSyncedOnce ? 'NO APP INVENTORY' : 'LOADING INVENTORY…');
+                } else {
+                    invEmpty.style.display = 'none';
+                }
+            }
         }
 
+        // Initial chrome: loading until connect + first sync
+        setConnState('conn.loading', 'LINKING // AWAITING SYNC…');
+
         socket.on('connect', () => {
-            statusBox.classList.add('connected');
-            connectionStatus.textContent = 'LINK SECURE // MESH ONLINE';
+            if (operatorPaused) {
+                setConnState('conn.paused', 'MESH PAUSED // OPERATOR HOLD', { stamp: pausedAt });
+                return;
+            }
+            if (hasSyncedOnce) setConnState('conn.online', 'LINK SECURE // MESH ONLINE', { stamp: lastSyncAt });
+            else setConnState('conn.loading', 'LINKING // AWAITING SYNC…');
         });
 
         socket.on('disconnect', () => {
-            statusBox.classList.remove('connected');
-            connectionStatus.textContent = 'LINK LOST // RECONNECTING';
+            if (operatorPaused) return;
+            setConnState('conn.offline', 'LINK LOST // RECONNECTING');
+        });
+
+        socket.on('connect_error', (err) => {
+            lastErrorAt = new Date().toISOString();
+            const code = (err && (err.message || err.type)) || 'connect_error';
+            setConnState('conn.error', 'LINK ERROR // ' + String(code).slice(0, 48), { stamp: lastErrorAt });
+            showToast('error', 'Socket connect_error: ' + code);
+        });
+
+        socket.on('c2_result', (payload) => {
+            const ok = payload && (payload.ok === true || payload.success === true || payload.status === 'ok' || payload.status === 'success');
+            const code = extractAllowlistCode(payload);
+            if (code || (payload && payload.status === 403)) {
+                const c = code || 'allowlist_c2_denied';
+                blockedAt = new Date().toISOString();
+                setConnState('conn.blocked', 'ACCESS BLOCKED // ALLOWLIST', { stamp: blockedAt });
+                showToast('blocked', 'C2 blocked — ' + (ALLOWLIST_CODES[c] || c) + ' (' + c + ')');
+                return;
+            }
+            if (ok) {
+                showToast('success', 'C2 OK: ' + (payload.action || payload.command || 'result') + ' @ ' + formatStamp(payload.ts || payload.received_at || new Date().toISOString()).display);
+            } else {
+                lastErrorAt = new Date().toISOString();
+                showToast('error', 'C2 FAIL: ' + (payload && (payload.error || payload.message || JSON.stringify(payload))) );
+            }
         });
 
         // --------------------------------------------------------
@@ -494,7 +796,7 @@
         // --------------------------------------------------------
         socket.on('sync_state', (data) => {
             globalThreats = [...data.alerts, ...data.threats]
-                .sort((a,b) => new Date(b.received_at || b.ingested_at) - new Date(a.received_at || a.ingested_at));
+                .sort((a,b) => new Date(b.received_at || b.ingested_at || 0) - new Date(a.received_at || a.ingested_at || 0));
             
             if(data.assets) {
                 globalAssets = data.assets;
@@ -507,6 +809,11 @@
             if(data.groups) appGroups = data.groups;
             if(data.deviceGroups) appDeviceGroups = data.deviceGroups;
             renderMatrix();
+            hasSyncedOnce = true;
+            lastSyncAt = (data && data.synced_at) || new Date().toISOString();
+            if (!operatorPaused) {
+                setConnState('conn.online', 'LINK SECURE // MESH ONLINE', { stamp: lastSyncAt });
+            }
         });
 
         socket.on('policy_sync', (data) => {
@@ -566,7 +873,7 @@
             
             sortedNodes.forEach(id => {
                 const data = globalAssets[id];
-                const time = new Date(data.last_seen).toLocaleTimeString();
+                const time = formatStamp(data.last_seen).display;
                 const div = document.createElement('div');
                 div.className = `mesh-node ${activeDeviceFilter === id ? 'active' : ''}`;
                 div.id = id;
@@ -586,6 +893,7 @@
                 grid.appendChild(div);
             });
             filterMesh(); // Keep search active if re-rendered
+            updateEmptyStates();
         }
 
         function isolateDevice(id) {
@@ -662,6 +970,7 @@
                 grid.appendChild(div);
             });
             filterInventory();
+            updateEmptyStates();
         }
 
         // --------------------------------------------------------
@@ -684,7 +993,7 @@
             const isFIM = event.event_type !== 'THREAT_INTEL' && event.event_type !== 'ORACLE_TELEMETRY';
             const typeClass = isFIM ? 'tag-fim' : 'tag-intel';
             const typeLabel = event.event_type || 'ALERT';
-            const time = new Date(event.received_at || event.ingested_at || Date.now()).toLocaleTimeString();
+            const time = formatStamp(event.received_at || event.ingested_at || null).display;
             const safeId = event.id || event.file_path;
             
             let displayReason = event.ai_reason || event.ai_summary || event.ai_verdict;
@@ -741,6 +1050,7 @@
         // --------------------------------------------------------
         function issueCommand(action, target, host) {
             if(!target || target === 'undefined') return alert('No valid target path/PID found.');
+            if (!canMutate('C2 ' + action)) return;
             
             const promptMap = {
                 'quarantine': `⚠️ EXTREME ACTION: Execute File Quarantine across payload on [${host || 'Local'}]?`,
@@ -755,7 +1065,7 @@
 
         function inspectAlert(id) {
             const event = eventRegistry[id];
-            if(!event) return alert("Alert details not found in local registry.");
+            if(!event) { showToast("error", "ALERT NOT FOUND"); return alert("ALERT NOT FOUND"); }
             
             const inspectorBody = document.getElementById('inspector-body');
             inspectorBody.innerHTML = `
@@ -795,6 +1105,7 @@
         }
         
         async function saveInfrastructure() {
+            if (!canMutate('save infrastructure')) return;
             const ip = document.getElementById('infra-ip').value;
             const user = document.getElementById('infra-user').value;
             const pass = document.getElementById('infra-pass').value;
@@ -806,12 +1117,19 @@
                     headers: {'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
                     body: JSON.stringify({ ip, username: user, password: pass, type: 'switch', protocol: 'ssh' })
                 });
+                let body = null;
+                try { body = await res.json(); } catch(_) { body = null; }
+                if (await handleAllowlistResponse(res, body)) return;
                 if(res.ok) {
                     alert('Credentials Vaulted Successfully');
                     document.getElementById('infra-pass').value = '';
+                } else {
+                    lastErrorAt = new Date().toISOString();
+                    showToast('error', 'Infra save failed HTTP ' + res.status + ' @ ' + formatStamp(lastErrorAt).display);
                 }
             } catch(e) {
-                alert('Error saving infrastructure');
+                lastErrorAt = new Date().toISOString();
+                showToast('error', 'Infra save error: ' + (e && e.message ? e.message : e));
             }
         }
         
@@ -846,23 +1164,50 @@
                         </div>
                     `;
                 }
-            } catch(e) {}
+            } catch(e) {
+                lastErrorAt = new Date().toISOString();
+                showToast('error', 'Topology fetch error: ' + (e && e.message ? e.message : e) + ' @ ' + formatStamp(lastErrorAt).display);
+            }
         }
         
         async function clearInfrastructure() {
+            if (!canMutate('purge infrastructure')) return;
             if(!confirm("Erase all securely vaulted SSH Switch Credentials?")) return;
             try {
-                await fetch(`/api/v2/infrastructure`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
+                const res = await fetch(`/api/v2/infrastructure`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
+                let body = null;
+                try { body = await res.json(); } catch(_) { body = null; }
+                if (await handleAllowlistResponse(res, body)) return;
+                if (!res.ok) {
+                    lastErrorAt = new Date().toISOString();
+                    showToast('error', 'Purge failed HTTP ' + res.status);
+                    return;
+                }
                 alert("Credentials Purged.");
-            } catch(e) {}
+            } catch(e) {
+                lastErrorAt = new Date().toISOString();
+                showToast('error', 'Purge error: ' + (e && e.message ? e.message : e));
+            }
         }
 
         async function clearTopology() {
+            if (!canMutate('clear topology')) return;
             if(!confirm("Erase network topology maps and baseline history?")) return;
             try {
-                await fetch(`/api/v2/topology`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
+                const res = await fetch(`/api/v2/topology`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
+                let body = null;
+                try { body = await res.json(); } catch(_) { body = null; }
+                if (await handleAllowlistResponse(res, body)) return;
+                if (!res.ok) {
+                    lastErrorAt = new Date().toISOString();
+                    showToast('error', 'Clear maps failed HTTP ' + res.status);
+                    return;
+                }
                 fetchTopology();
-            } catch(e) {}
+            } catch(e) {
+                lastErrorAt = new Date().toISOString();
+                showToast('error', 'Clear maps error: ' + (e && e.message ? e.message : e));
+            }
         }
 
         // ----------------------------------------------------
@@ -888,12 +1233,21 @@
         }
 
         async function deployOta() {
+            if (!canMutate('OTA deploy')) return;
             const file = document.getElementById('ota-file-input').files[0];
             const group = document.getElementById('ota-group-select').value;
             if (!file) return alert("Please select a valid payload zip.");
+            if (group === 'ALL') {
+                // Client soft-block matching BE allowlist_ota_all_forbidden
+                blockedAt = new Date().toISOString();
+                setConnState('conn.blocked', 'ACCESS BLOCKED // ALLOWLIST', { stamp: blockedAt });
+                showToast('blocked', 'Blocked — OTA ALL FORBIDDEN (allowlist_ota_all_forbidden)');
+                return;
+            }
             
             const btn = document.getElementById('ota-deploy-btn');
             btn.textContent = 'TRANSMITTING...';
+            btn.disabled = true;
             
             const buffer = await file.arrayBuffer();
             
@@ -903,14 +1257,26 @@
                     headers: { 'x-api-key': 'YOUR_SECRET_API_KEY_HERE', 'Content-Type': 'application/zip' },
                     body: buffer
                 });
-                const data = await res.json();
-                if (data.error) throw new Error(data.error);
+                let data = null;
+                try { data = await res.json(); } catch(_) { data = {}; }
+                if (await handleAllowlistResponse(res, data)) {
+                    btn.textContent = 'TRANSMIT OTA PAYLOAD';
+                    btn.disabled = false;
+                    return;
+                }
+                if (data && data.error) throw new Error(data.error);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
                 
                 alert(`OTA UPDATE SUCCESS: Payload securely queued for ${data.hostsUpdated} hosts in group '${group}'.`);
                 document.getElementById('ota-modal').classList.remove('active');
             } catch (err) {
-                alert(`OTA FAILURE: ${err.message}`);
+                lastErrorAt = new Date().toISOString();
+                const msg = `OTA FAILURE: ${err.message} @ ${formatStamp(lastErrorAt).display}`;
+                showToast('error', msg);
+                alert(msg);
                 btn.textContent = 'TRANSMIT OTA PAYLOAD';
+            } finally {
+                btn.disabled = false;
             }
         }
         
@@ -925,7 +1291,14 @@
         function renderPolicyModal() {
              const groupList = document.getElementById('group-list');
              groupList.innerHTML = '';
-             Object.keys(appGroups).forEach(g => {
+             const groupKeys = Object.keys(appGroups);
+             if (groupKeys.length === 0) {
+                 const notice = document.createElement('div');
+                 notice.style.cssText = 'color:var(--warning); font-family:Fira Code; font-size:0.75rem; padding:8px;';
+                 notice.textContent = 'NO MAPPED GROUPS';
+                 groupList.appendChild(notice);
+             }
+             groupKeys.forEach(g => {
                  const btn = document.createElement('button');
                  btn.textContent = g;
                  btn.style.cssText = `padding:8px 12px; text-align:left; border-radius:6px; cursor:pointer; font-family:'Fira Code'; font-size:0.85rem; border:1px solid ${g === activePolicyGroup ? 'var(--accent)' : 'transparent'}; background:${g === activePolicyGroup ? 'rgba(0,240,255,0.1)' : 'rgba(255,255,255,0.05)'}; color:#fff; transition:all 0.2s;`;
@@ -980,28 +1353,65 @@
              });
         }
         
-        function reassignHost(host, newGroup) {
-            fetch('/api/v2/policies/update', {
-                method: 'POST', headers:{'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
-                body: JSON.stringify({ host: host, newGroup: newGroup })
-            });
+        async function reassignHost(host, newGroup) {
+            if (!canMutate('reassign host')) return;
+            try {
+                const res = await fetch('/api/v2/policies/update', {
+                    method: 'POST', headers:{'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
+                    body: JSON.stringify({ host: host, newGroup: newGroup })
+                });
+                let body = null;
+                try { body = await res.json(); } catch(_) { body = null; }
+                if (await handleAllowlistResponse(res, body)) return;
+                if (!res.ok) {
+                    lastErrorAt = new Date().toISOString();
+                    showToast('error', 'Reassign failed HTTP ' + res.status);
+                }
+            } catch (e) {
+                lastErrorAt = new Date().toISOString();
+                showToast('error', 'Reassign error: ' + (e && e.message ? e.message : e));
+            }
         }
         
-        function savePolicyConfig() {
+        async function savePolicyConfig() {
+            if (!canMutate('save policy')) return;
             const newPol = {};
             const keys = ["ENABLE_FIM", "ENABLE_BEHAVIORAL", "ENABLE_ORACLE", "ENABLE_DECOY", "ENABLE_YARA", "ENABLE_COMPLIANCE", "ENABLE_NDR", "ENABLE_ROLLBACK", "WATCHTOWER_AUDIT_MODE"];
             keys.forEach(k => {
                 newPol[k] = document.getElementById('pol-'+k).checked;
             });
-            fetch('/api/v2/policies/update', {
-                method: 'POST', headers:{'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
-                body: JSON.stringify({ group: activePolicyGroup, policy: newPol })
-            }).then(() => {
+            try {
+                const res = await fetch('/api/v2/policies/update', {
+                    method: 'POST', headers:{'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
+                    body: JSON.stringify({ group: activePolicyGroup, policy: newPol })
+                });
+                let body = null;
+                try { body = await res.json(); } catch(_) { body = null; }
+                if (await handleAllowlistResponse(res, body)) return;
+                if (!res.ok) {
+                    lastErrorAt = new Date().toISOString();
+                    showToast('error', 'Policy save failed HTTP ' + res.status);
+                    return;
+                }
                 alert(`Policy deployed to Host Group: ${activePolicyGroup}`);
-            });
+            } catch (e) {
+                lastErrorAt = new Date().toISOString();
+                showToast('error', 'Policy save error: ' + (e && e.message ? e.message : e));
+            }
+        }
+
+        // FE-POL-01: alias savePolicy → savePolicyConfig
+        function savePolicy() {
+            try {
+                return savePolicyConfig();
+            } catch (e) {
+                showToast('error', 'POLICY SAVE UNAVAILABLE (FE-POL-01)');
+                throw e;
+            }
         }
         
         function createGroup() {
+            if (!canMutate('create group')) return;
             const name = document.getElementById('new-group-name').value.trim();
             if(!name || appGroups[name]) return;
             activePolicyGroup = name;
@@ -1010,6 +1420,10 @@
             savePolicy();
             document.getElementById('new-group-name').value = '';
         }
+
+        // Mark header mutate affordances after DOM ready
+        document.querySelectorAll('#ota-deploy-btn, [onclick*="saveInfrastructure"]').forEach(el => el.setAttribute('data-mutate', '1'));
+        refreshMutateGates();
     </script>
 </body>
 </html>
