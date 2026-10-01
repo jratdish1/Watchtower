@@ -441,10 +441,8 @@
     </div>
 
     <script>
-        const API_PORT = '4040'; 
-        const socket = io('http://' + window.location.hostname + ':' + API_PORT, {
-            auth: { token: "YOUR_SECRET_API_KEY_HERE" }
-        });
+        const API_PORT = "443"; // proxied through nginx
+        const socket = io(window.location.origin, { path: "/socket.io/", auth: { token: "YOUR_SECRET_API_KEY_HERE" } });
         
         // DOM Elements
         const statusBox = document.getElementById('connection-status-box');
@@ -803,7 +801,7 @@
             if(!ip || !user || !pass) return alert("Fill all fields.");
             
             try {
-                const res = await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/infrastructure`, {
+                const res = await fetch(`/api/v2/infrastructure`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
                     body: JSON.stringify({ ip, username: user, password: pass, type: 'switch', protocol: 'ssh' })
@@ -819,7 +817,7 @@
         
         async function fetchTopology() {
             try {
-                const res = await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/topology`, {
+                const res = await fetch(`/api/v2/topology`, {
                     headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'}
                 });
                 const data = await res.json();
@@ -854,7 +852,7 @@
         async function clearInfrastructure() {
             if(!confirm("Erase all securely vaulted SSH Switch Credentials?")) return;
             try {
-                await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/infrastructure`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
+                await fetch(`/api/v2/infrastructure`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
                 alert("Credentials Purged.");
             } catch(e) {}
         }
@@ -862,7 +860,7 @@
         async function clearTopology() {
             if(!confirm("Erase network topology maps and baseline history?")) return;
             try {
-                await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/topology`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
+                await fetch(`/api/v2/topology`, { method: 'DELETE', headers: {'x-api-key': 'YOUR_SECRET_API_KEY_HERE'} });
                 fetchTopology();
             } catch(e) {}
         }
@@ -900,7 +898,7 @@
             const buffer = await file.arrayBuffer();
             
             try {
-                const res = await fetch(`http://${window.location.hostname}:${API_PORT}/api/v2/ota/upload?group=${group}`, {
+                const res = await fetch(`/api/v2/ota/upload?group=${group}`, {
                     method: 'POST',
                     headers: { 'x-api-key': 'YOUR_SECRET_API_KEY_HERE', 'Content-Type': 'application/zip' },
                     body: buffer
@@ -983,7 +981,7 @@
         }
         
         function reassignHost(host, newGroup) {
-            fetch('http://' + window.location.hostname + ':' + API_PORT + '/api/v2/policies/update', {
+            fetch('/api/v2/policies/update', {
                 method: 'POST', headers:{'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
                 body: JSON.stringify({ host: host, newGroup: newGroup })
             });
@@ -995,7 +993,7 @@
             keys.forEach(k => {
                 newPol[k] = document.getElementById('pol-'+k).checked;
             });
-            fetch('http://' + window.location.hostname + ':' + API_PORT + '/api/v2/policies/update', {
+            fetch('/api/v2/policies/update', {
                 method: 'POST', headers:{'Content-Type': 'application/json', 'x-api-key': 'YOUR_SECRET_API_KEY_HERE'},
                 body: JSON.stringify({ group: activePolicyGroup, policy: newPol })
             }).then(() => {
