@@ -11,7 +11,7 @@
  *                                   profiles → all mapped-group mutates DENY until
  *                                   Escalation binds + sets env (fail-closed)
  *   WATCHTOWER_OTA_ALLOW_ALL=1  Exact-GO override for group=ALL OTA (default off)
- *   WATCHTOWER_ALLOWLIST_PATH   optional path to allowlist.json seed
+ *   WATCHTOWER_ALLOWLIST_PATH   optional override path; missing/bad → fail-closed empty map\n *                               (omit group from file = revoke; no DEFAULT_SEED merge)
  */
 'use strict';
 
@@ -63,29 +63,119 @@ function isEnabled() {
   return e;
 }
 
+/** Fail-closed empty map — omit groups stay denied; no illustrative fall-open. */
+function denyAllConfig(reason) {
+  return {
+    host_group_to_profiles: {},
+    ota: { allow_all: false },
+    c2: { destructive_actions: [], audit_blocked_actions: [] },
+    _loadError: reason || 'deny_all',
+  };
+}
+
+/**
+ * Validate allowlist shapes. Returns {ok, cfg} or {ok:false, reason}.
+ * Profiles must be string arrays; C2 lists must be arrays.
+ */
+function validateAndNormalize(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, reason: 'root_not_object' };
+  }
+  const mapIn = raw.host_group_to_profiles;
+  if (mapIn === undefined || mapIn === null) {
+    // Empty map is valid (deny all groups)
+    return {
+      ok: true,
+      cfg: {
+        host_group_to_profiles: {},
+        ota: { allow_all: false, ...(raw.ota && typeof raw.ota === 'object' ? { allow_all: !!raw.ota.allow_all } : {}) },
+        c2: {
+          destructive_actions: [],
+          audit_blocked_actions: [],
+          ...(raw.c2 && typeof raw.c2 === 'object' ? {} : {}),
+        },
+      },
+    };
+  }
+  if (typeof mapIn !== 'object' || Array.isArray(mapIn)) {
+    return { ok: false, reason: 'host_group_to_profiles_not_object' };
+  }
+  const host_group_to_profiles = {};
+  for (const [group, profiles] of Object.entries(mapIn)) {
+    if (!Array.isArray(profiles)) {
+      return { ok: false, reason: `profiles_not_array:${group}` };
+    }
+    if (!profiles.every((p) => typeof p === 'string')) {
+      return { ok: false, reason: `profiles_not_strings:${group}` };
+    }
+    host_group_to_profiles[group] = profiles.slice();
+  }
+  const otaRaw = raw.ota && typeof raw.ota === 'object' && !Array.isArray(raw.ota) ? raw.ota : {};
+  const c2Raw = raw.c2 && typeof raw.c2 === 'object' && !Array.isArray(raw.c2) ? raw.c2 : {};
+  if (c2Raw.destructive_actions !== undefined && !Array.isArray(c2Raw.destructive_actions)) {
+    return { ok: false, reason: 'c2.destructive_actions_not_array' };
+  }
+  if (c2Raw.audit_blocked_actions !== undefined && !Array.isArray(c2Raw.audit_blocked_actions)) {
+    return { ok: false, reason: 'c2.audit_blocked_actions_not_array' };
+  }
+  return {
+    ok: true,
+    cfg: {
+      host_group_to_profiles,
+      ota: { allow_all: false, ...otaRaw, allow_all: otaRaw.allow_all === true },
+      c2: {
+        destructive_actions: Array.isArray(c2Raw.destructive_actions)
+          ? c2Raw.destructive_actions.slice()
+          : DEFAULT_SEED.c2.destructive_actions.slice(),
+        audit_blocked_actions: Array.isArray(c2Raw.audit_blocked_actions)
+          ? c2Raw.audit_blocked_actions.slice()
+          : DEFAULT_SEED.c2.audit_blocked_actions.slice(),
+      },
+    },
+  };
+}
+
+/**
+ * Load allowlist.
+ * - Bundled allowlist.json (default path, exists): sole source of truth — omit group = revoke
+ *   (NO merge with DEFAULT_SEED illustrative entries).
+ * - WATCHTOWER_ALLOWLIST_PATH set: must exist + parse + validate; else fail-closed empty map
+ *   (NO Ops-Fleet/Builder-Lab fall-open).
+ * - No file at default path: embedded DEFAULT_SEED (dev bootstrap only).
+ */
 function loadConfig(forceReload) {
   if (_config && !forceReload) return _config;
-  const cfgPath =
-    process.env.WATCHTOWER_ALLOWLIST_PATH || path.join(__dirname, 'allowlist.json');
+  const explicitPath = process.env.WATCHTOWER_ALLOWLIST_PATH;
+  const cfgPath = explicitPath || path.join(__dirname, 'allowlist.json');
+  const pathWasExplicit = Boolean(explicitPath && String(explicitPath).trim());
+
   try {
-    if (fs.existsSync(cfgPath)) {
-      const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-      _config = {
-        host_group_to_profiles: {
-          ...DEFAULT_SEED.host_group_to_profiles,
-          ...(raw.host_group_to_profiles || {}),
-        },
-        ota: { ...DEFAULT_SEED.ota, ...(raw.ota || {}) },
-        c2: { ...DEFAULT_SEED.c2, ...(raw.c2 || {}) },
-      };
-    } else {
+    if (!fs.existsSync(cfgPath)) {
+      if (pathWasExplicit) {
+        console.warn('[allowlist] WATCHTOWER_ALLOWLIST_PATH missing — fail-closed empty map:', cfgPath);
+        _config = denyAllConfig('path_missing');
+        return _config;
+      }
+      // No bundled file: bootstrap seed only
       _config = JSON.parse(JSON.stringify(DEFAULT_SEED));
+      return _config;
     }
+    const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const validated = validateAndNormalize(raw);
+    if (!validated.ok) {
+      console.warn('[allowlist] Invalid shape — fail-closed empty map:', validated.reason);
+      _config = denyAllConfig(validated.reason);
+      return _config;
+    }
+    // File is sole SoT for host_group_to_profiles — do NOT merge DEFAULT_SEED
+    // (omitted Ops-Fleet/Builder-Lab must revoke, not retain).
+    _config = validated.cfg;
+    return _config;
   } catch (e) {
-    console.warn('[allowlist] Failed to load seed; using embedded DEFAULT_SEED:', e.message);
-    _config = JSON.parse(JSON.stringify(DEFAULT_SEED));
+    console.warn('[allowlist] Load/parse failed — fail-closed empty map:', e.message);
+    _config = denyAllConfig('load_parse_error:' + e.message);
+    return _config;
   }
-  return _config;
 }
 
 /** Test helper: replace in-memory map without touching disk. */
@@ -107,7 +197,7 @@ function getProfilesForGroup(hostGroup) {
 
 function isMappedGroup(hostGroup) {
   const profiles = getProfilesForGroup(hostGroup);
-  if (!profiles || profiles.length === 0) return false;
+  if (!Array.isArray(profiles) || profiles.length === 0) return false;
   if (profiles.length === 1 && profiles[0] === UNMAPPED) return false;
   if (profiles.every((p) => p === UNMAPPED)) return false;
   return true;
