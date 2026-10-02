@@ -484,6 +484,13 @@
     <script>
         const API_PORT = "443"; // proxied through nginx
         const socket = io(window.location.origin, { path: "/socket.io/", auth: { token: "YOUR_SECRET_API_KEY_HERE" } });
+
+        // FE-XSS-01: every agent/host/API-supplied value rendered through innerHTML MUST go
+        // through escHtml(). Never build inline on*="" handlers from data; bind listeners instead.
+        function escHtml(value) {
+            const str = value === undefined || value === null ? '' : String(value);
+            return str.replace(/[&<>"'`]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]));
+        }
         
         // DOM Elements
         const statusBox = document.getElementById('connection-status-box');
@@ -724,7 +731,7 @@
                     emptySubtext.textContent = 'OFFLINE — NO TELEMETRY YET';
                 } else if (activeDeviceFilter) {
                     if (matrixTitleEl) matrixTitleEl.textContent = '[SYSTEM NOMINAL]';
-                    emptySubtext.innerHTML = `NO ALERTS<br><span style="color:var(--success); font-weight:bold; font-size:0.9rem; display:inline-block; margin-top:8px;">[ ${activeDeviceFilter} IS SECURE ]</span>`;
+                    emptySubtext.innerHTML = `NO ALERTS<br><span style="color:var(--success); font-weight:bold; font-size:0.9rem; display:inline-block; margin-top:8px;">[ ${escHtml(activeDeviceFilter)} IS SECURE ]</span>`;
                 } else {
                     if (matrixTitleEl) matrixTitleEl.textContent = '[SYSTEM NOMINAL]';
                     emptySubtext.textContent = hasSyncedOnce ? 'NO ALERTS' : 'AWAITING SECURITY TELEMETRY...';
@@ -896,12 +903,12 @@
                 
                 div.innerHTML = `
                     <div style="font-weight:bold; color:var(--text); font-size:0.95rem; display:flex; align-items:center; gap:6px;">
-                        <span style="color:var(--accent);">●</span> ${id}
+                        <span style="color:var(--accent);">●</span> ${escHtml(id)}
                     </div>
                     <div style="font-size:0.75rem; color:var(--text-dim); display:flex; justify-content:space-between; margin-top:4px;">
-                        <span>Sync: ${time}</span>
+                        <span>Sync: ${escHtml(time)}</span>
                         <span style="${data.incident_count > 0 ? 'color:var(--danger); font-weight:bold;' : 'color:var(--success);'}">
-                            Alerts: ${data.incident_count}
+                            Alerts: ${escHtml(data.incident_count)}
                         </span>
                     </div>
                 `;
@@ -913,7 +920,7 @@
 
         function isolateDevice(id) {
             activeDeviceFilter = id;
-            matrixTitle.innerHTML = `Endpoint Intelligence <span style="color:var(--accent); font-family:'Fira Code'; margin-left:8px;">[ ${id} ]</span>`;
+            matrixTitle.innerHTML = `Endpoint Intelligence <span style="color:var(--accent); font-family:'Fira Code'; margin-left:8px;">[ ${escHtml(id)} ]</span>`;
             clearFilterBtn.style.display = 'flex';
             renderMeshPanel();
             renderMatrix();
@@ -968,20 +975,27 @@
                 div.style.cssText = 'padding: 10px; background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; font-family: "Fira Code", monospace; font-size: 0.8rem; transition: all 0.2s ease;';
                 
                 const shortHash = app.hash.length > 32 ? app.hash.substring(0, 16) + '...' : app.hash;
-                const killBtn = app.hash !== 'UNKNOWN' && app.hash !== 'ACCESS_DENIED' ? `<button onclick="navigator.clipboard.writeText('${app.hash}'); alert('Copied SHA256 Hash');" style="background:rgba(255,255,255,0.05); color:#fff; border:1px solid rgba(255,255,255,0.1); padding:4px 8px; border-radius:6px; font-size:0.65rem; cursor:pointer;">Copy Hash</button>` : '';
+                const killBtn = app.hash !== 'UNKNOWN' && app.hash !== 'ACCESS_DENIED' ? `<button type="button" data-copy-hash="${escHtml(app.hash)}" style="background:rgba(255,255,255,0.05); color:#fff; border:1px solid rgba(255,255,255,0.1); padding:4px 8px; border-radius:6px; font-size:0.65rem; cursor:pointer;">Copy Hash</button>` : '';
 
                 div.innerHTML = `
                     <div style="display:flex; flex-direction:column; gap:4px;">
-                        <span style="color:var(--accent); font-weight:bold;">${app.name} <span style="color:var(--text-dim); font-weight:normal;">(${app.user})</span></span>
-                        <span style="color:var(--text-dim); font-size:0.7rem;">Host: ${app.host} | SHA256: ${shortHash}</span>
+                        <span style="color:var(--accent); font-weight:bold;">${escHtml(app.name)} <span style="color:var(--text-dim); font-weight:normal;">(${escHtml(app.user)})</span></span>
+                        <span style="color:var(--text-dim); font-size:0.7rem;">Host: ${escHtml(app.host)} | SHA256: ${escHtml(shortHash)}</span>
                     </div>
                     <div style="display:flex; align-items:center; gap: 12px;">
                         ${killBtn}
                         <div style="background:rgba(16,185,129,0.1); color:var(--success); border: 1px solid rgba(16,185,129,0.3); padding:4px 10px; border-radius:12px; font-weight:bold; min-width:60px; text-align:center;">
-                            ${formatUptime(app.uptime)}
+                            ${escHtml(formatUptime(app.uptime))}
                         </div>
                     </div>
                 `;
+                const copyBtn = div.querySelector('[data-copy-hash]');
+                if (copyBtn) {
+                    copyBtn.addEventListener('click', () => {
+                        navigator.clipboard.writeText(copyBtn.dataset.copyHash);
+                        alert('Copied SHA256 Hash');
+                    });
+                }
                 grid.appendChild(div);
             });
             filterInventory();
@@ -1017,39 +1031,47 @@
             const streamEntry = document.createElement('div');
             streamEntry.className = `stream-entry ${event.severity || 'low'}`;
             streamEntry.innerHTML = `
-                <div class="entry-meta">[${time}] // ${event.source || 'LOCAL'}</div>
-                <div class="entry-title">${event.title || event.file_path}</div>
-                <div class="entry-ai">>> AI: ${displayReason}</div>
+                <div class="entry-meta">[${escHtml(time)}] // ${escHtml(event.source || 'LOCAL')}</div>
+                <div class="entry-title">${escHtml(event.title || event.file_path)}</div>
+                <div class="entry-ai">&gt;&gt; AI: ${escHtml(displayReason)}</div>
             `;
 
             // --- MATRIX CARD ---
             const matrixCard = document.createElement('div');
             matrixCard.className = `alert-card ${event.severity || 'low'}`;
             
-            let actionButtons = `<button class="btn-inspect" onclick="inspectAlert('${safeId}')">&#x1F50E; Deep Inspect</button>`;
+            let actionButtons = `<button type="button" class="btn-inspect" data-fe-act="inspect">&#x1F50E; Deep Inspect</button>`;
             
             if (isFIM) {
                 actionButtons += `
-                    <button class="btn-quarantine" onclick="issueCommand('quarantine', '${event.file_path}', '${event.source}')">⚠️ Quarantine</button>
-                    <button class="btn-freeze" onclick="issueCommand('lock_dir', '${event.file_path}', '${event.source}')">❄️ Freeze Dir</button>
+                    <button type="button" class="btn-quarantine" data-fe-act="quarantine">⚠️ Quarantine</button>
+                    <button type="button" class="btn-freeze" data-fe-act="lock_dir">❄️ Freeze Dir</button>
                 `;
             } else if (event.event_type === 'ORACLE_TELEMETRY') {
-                actionButtons += `<button class="btn-quarantine" onclick="issueCommand('kill', '${event.file_path}', '${event.source}')">🧨 Kill Process</button>`;
+                actionButtons += `<button type="button" class="btn-quarantine" data-fe-act="kill">🧨 Kill Process</button>`;
             }
 
             matrixCard.innerHTML = `
-                <div class="alert-tag ${typeClass}">${typeLabel}</div>
-                <div style="font-size: 0.70rem; color: var(--text-dim); margin-bottom: 6px; font-family: 'Fira Code', monospace;">[${time}] // Orig: ${event.source || 'Local'}</div>
+                <div class="alert-tag ${typeClass}">${escHtml(typeLabel)}</div>
+                <div style="font-size: 0.70rem; color: var(--text-dim); margin-bottom: 6px; font-family: 'Fira Code', monospace;">[${escHtml(time)}] // Orig: ${escHtml(event.source || 'Local')}</div>
                 <div style="font-weight: 600; font-size: 1rem; margin-bottom: 12px; word-break: break-word; line-height: 1.3;">
-                    ${event.title || (event.file_path ? event.file_path.split('/').pop() : 'Unknown')}
+                    ${escHtml(event.title || (event.file_path ? String(event.file_path).split('/').pop() : 'Unknown'))}
                 </div>
                 <div style="font-size: 0.80rem; color: var(--text-dim); margin-bottom: 12px; background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius: 6px;">
-                    VERDICT: <span style="font-weight: 800; font-family:'Fira Code'; color: ${event.severity === 'high' ? 'var(--danger)' : event.severity === 'medium' ? 'var(--warning)' : 'var(--success)'}">${event.ai_verdict}</span>
+                    VERDICT: <span style="font-weight: 800; font-family:'Fira Code'; color: ${event.severity === 'high' ? 'var(--danger)' : event.severity === 'medium' ? 'var(--warning)' : 'var(--success)'}">${escHtml(event.ai_verdict)}</span>
                 </div>
                 <div class="alert-actions">
                     ${actionButtons}
                 </div>
             `;
+
+            matrixCard.querySelectorAll('[data-fe-act]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const act = btn.dataset.feAct;
+                    if (act === 'inspect') return inspectAlert(safeId);
+                    issueCommand(act, event.file_path, event.source);
+                });
+            });
 
             if (prepend) {
                 streamEl.prepend(streamEntry);
@@ -1087,20 +1109,20 @@
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px;">
                     <div style="background: rgba(255,255,255,0.02); padding: 20px; border-radius: 14px; border: 1px solid var(--border);">
                         <span style="font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; font-weight: bold;">Verdict Assessment</span>
-                        <div style="font-weight: bold; font-family: 'Fira Code'; font-size: 1.3rem; color: var(--accent); margin-top: 8px;">${event.ai_verdict}</div>
+                        <div style="font-weight: bold; font-family: 'Fira Code'; font-size: 1.3rem; color: var(--accent); margin-top: 8px;">${escHtml(event.ai_verdict)}</div>
                     </div>
                     <div style="background: rgba(255,255,255,0.02); padding: 20px; border-radius: 14px; border: 1px solid var(--border);">
                         <span style="font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; font-weight: bold;">Mesh Origin</span>
-                        <div style="font-weight: bold; font-size: 1.2rem; margin-top: 8px;">${event.source || 'LOCAL_NODE'}</div>
+                        <div style="font-weight: bold; font-size: 1.2rem; margin-top: 8px;">${escHtml(event.source || 'LOCAL_NODE')}</div>
                     </div>
                 </div>
-                <p><strong>Target Vector / Path:</strong> <br><span style="word-wrap:break-word; font-family: 'Fira Code', monospace; font-size:0.95rem; color: var(--text-dim); display:inline-block; margin-top:6px;">${event.file_path || 'N/A'}</span></p>
+                <p><strong>Target Vector / Path:</strong> <br><span style="word-wrap:break-word; font-family: 'Fira Code', monospace; font-size:0.95rem; color: var(--text-dim); display:inline-block; margin-top:6px;">${escHtml(event.file_path || 'N/A')}</span></p>
                 
                 <h3 style="color: var(--accent); font-size: 1rem; text-transform: uppercase; margin-top: 32px; border-bottom: 1px solid var(--border); padding-bottom: 12px; font-weight:800;">Cognitive Reasoning</h3>
-                <pre>${event.ai_reason || event.ai_summary || 'No detailed reason provided.'}</pre>
+                <pre>${escHtml(event.ai_reason || event.ai_summary || 'No detailed reason provided.')}</pre>
                 
                 <h3 style="color: var(--accent); font-size: 1rem; text-transform: uppercase; margin-top: 32px; border-bottom: 1px solid var(--border); padding-bottom: 12px; font-weight:800;">Raw Node Telemetry [JSON]</h3>
-                <pre>${JSON.stringify(event, null, 2)}</pre>
+                <pre>${escHtml(JSON.stringify(event, null, 2))}</pre>
             `;
             document.getElementById('inspector-modal').classList.add('active');
         }
@@ -1173,9 +1195,9 @@
                     
                     container.innerHTML += `
                         <div class="mesh-node" style="border-left: 4px solid ${bColor}">
-                            <div style="font-weight:bold;">Switch: ${sw}</div>
-                            <div style="font-size:0.75rem; color:var(--text-dim);">Mapped Ports: ${maps[sw].length}</div>
-                            ${rogueCount > 0 ? `<div style="color:var(--danger); font-size:0.7rem; margin-top:4px;">⚠️ ${rogueCount} Port Density Anomalies!</div>` : ''}
+                            <div style="font-weight:bold;">Switch: ${escHtml(sw)}</div>
+                            <div style="font-size:0.75rem; color:var(--text-dim);">Mapped Ports: ${escHtml(maps[sw].length)}</div>
+                            ${rogueCount > 0 ? `<div style="color:var(--danger); font-size:0.7rem; margin-top:4px;">⚠️ ${escHtml(rogueCount)} Port Density Anomalies!</div>` : ''}
                         </div>
                     `;
                 }
@@ -1230,7 +1252,7 @@
             const select = document.getElementById('ota-group-select');
             select.innerHTML = '<option value="ALL">ALL HOST GROUPS</option>';
             Object.keys(appGroups).forEach(g => {
-                select.innerHTML += `<option value="${g}">${g}</option>`;
+                select.innerHTML += `<option value="${escHtml(g)}">${escHtml(g)}</option>`;
             });
             document.getElementById('ota-file-label').textContent = 'Select core.zip payload...';
             document.getElementById('ota-file-label').style.color = 'var(--accent)';
@@ -1354,17 +1376,21 @@
                  const hg = appDeviceGroups[host];
                  let selectOpts = '';
                  Object.keys(appGroups).forEach(g => {
-                     selectOpts += `<option value="${g}" ${g===hg ? 'selected' : ''}>${g}</option>`;
+                     selectOpts += `<option value="${escHtml(g)}" ${g===hg ? 'selected' : ''}>${escHtml(g)}</option>`;
                  });
                  
-                 hostList.innerHTML += `
+                 const hostRow = document.createElement('div');
+                 hostRow.innerHTML = `
                     <div style="background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border:1px solid var(--border);">
-                        <div style="font-family:'Fira Code'; font-size:0.8rem; margin-bottom:6px; color:var(--accent); font-weight:bold;">${host}</div>
-                        <select onchange="reassignHost('${host}', this.value)" style="width:100%; padding:6px; background:#000; color:#fff; border:1px solid var(--border); border-radius:6px; font-family:'Fira Code'; font-size:0.75rem; outline:none; cursor:pointer;">
+                        <div style="font-family:'Fira Code'; font-size:0.8rem; margin-bottom:6px; color:var(--accent); font-weight:bold;">${escHtml(host)}</div>
+                        <select data-fe-reassign="1" style="width:100%; padding:6px; background:#000; color:#fff; border:1px solid var(--border); border-radius:6px; font-family:'Fira Code'; font-size:0.75rem; outline:none; cursor:pointer;">
                             ${selectOpts}
                         </select>
                     </div>
                  `;
+                 const hostSelect = hostRow.querySelector('select[data-fe-reassign]');
+                 hostSelect.addEventListener('change', () => reassignHost(host, hostSelect.value));
+                 hostList.appendChild(hostRow);
              });
         }
         
