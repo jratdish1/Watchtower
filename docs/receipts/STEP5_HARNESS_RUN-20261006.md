@@ -1,6 +1,6 @@
 # Step 5 harness run — 2026-10-06
 
-**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC).
+**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC).
 **Runner:** isolated CI/VM (this workspace). No live hosts.
 **Node:** `v22.14.0`
 **Paper:** `jratdish1/knowledge-base` `ops/vao-torch/tasks/VAO-TASK-20261002-STEP5-HARNESS-PAPER.md` (blob `0940f85c3d297b3ce9f9744e87795e3075d902ad`). `gh api repos/jratdish1/knowledge-base/contents/...` returned HTTP 404; the file was read through the authenticated contents API. Paper score at plant: 16 specified, 0 executed. This receipt is the run.
@@ -14,9 +14,11 @@
 | base (`main` at branch point) | `383964e7851330ebe3d66ad1eb0fd0371f9b984f` |
 | prior tip (before operator-key close) | `8ca0cd8e99bae5d1d9335a02115701279ba00340` |
 | memory-search auth commit | `b2198712693630ced6674150aeb60b5819a39a6c` |
-| head (operator-key auth commit) | `9e25b7a1c6596a7ff12b101c032ada6bc882aa84` |
+| operator-key auth commit | `9e25b7a1c6596a7ff12b101c032ada6bc882aa84` |
+| prior tip (before this close) | `113287d3800dbbdcee4deed9895e01dc28a9f995` |
+| head (cookie and template-key commit) | `f0cde0ba2804833220c85eadf04f44bac66bf507` |
 
-`head` is `9e25b7a1c6596a7ff12b101c032ada6bc882aa84`, the commit that refuses a missing or placeholder operator key and removes that key from the Glass Pane HTML. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
+`head` is `f0cde0ba2804833220c85eadf04f44bac66bf507`, the commit that rejects a malformed session cookie, rejects example-file key literals, and keeps tests off the repo data directory. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
@@ -25,16 +27,16 @@ Working directory for every command: repository root.
 | Command | Exit | Passed | Failed | Skipped |
 |---------|------|--------|--------|---------|
 | `node backend/test/allowlist.test.js` | 0 | 19 | 0 | 0 |
-| `node backend/test/auth.test.js` | 0 | 70 | 0 | 0 |
+| `node backend/test/auth.test.js` | 0 | 123 | 0 | 0 |
 | `node backend/test/c2-socket.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/xss-static.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/csp-headers.test.js` | 0 | 34 | 0 | 0 |
-| `node frontend/test/ui-auth.test.js` | 0 | 45 | 0 | 0 |
-| `node frontend/test/step5-harness.test.js` | 0 | 61 | 0 | 0 |
+| `node frontend/test/ui-auth.test.js` | 0 | 68 | 0 | 0 |
+| `node frontend/test/step5-harness.test.js` | 0 | 62 | 0 | 0 |
 
-Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=61 failed=0 skipped=0`
+Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=62 failed=0 skipped=0`
 
-Combined checks: **251 passed, 0 failed, 0 skipped.** Auth is 70 (startup refusal, CGNAT, CORS, index 503, allowlist-off purge, auto-remediate). CSP is 34 (session plus distinct nonces). `ui-auth.test.js` is 45. Step 5 is 61. Allowlist 19, socket 11, XSS 11.
+Combined checks: **328 passed, 0 failed, 0 skipped.** Auth is 123 (startup refusal, example-file key literals, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, OTA public base, core fail-start, repo data files unchanged). CSP is 34 (session plus distinct nonces). `ui-auth.test.js` is 68. Step 5 is 62. Allowlist 19, socket 11, XSS 11.
 
 ## Step 5 matrix (16)
 
@@ -57,7 +59,7 @@ Paper rows are the isolated FE+BE harness. None of them call the VIC Hermes SSH 
 | 13 | Data-built inline `on*` absent; C2 target/host byte-exact | executed | 6 | 0 | 0 | no `on*=` attributes in the HTML; `issueCommand` emits the raw target and host |
 | 14 | `escHtml` edges (markup, quotes, empty, numbers) | executed | 4 | 0 | 0 | real `escHtml` from the Glass Pane script |
 | 15 | Missing event time → `TIME UNKNOWN` | executed | 7 | 0 | 0 | `formatStamp` null/empty/unparseable; card render; local `c2_result` `{ ok, status, action, target, result }` and the string-`result` shape both toast `C2 OK`, not `C2 FAIL` |
-| 16 | Offline and paused → mutating controls stay disabled | executed | 12 | 0 | 0 | `[data-mutate="1"]` buttons disable on offline and pause, enable on online and resume. Click, keyup, and change listeners are retained and dispatched (`fe-pause-btn`, `mesh-search`, `ota-file-input`, `fe-open-ota`) |
+| 16 | Offline and paused → mutating controls stay disabled | executed | 13 | 0 | 0 | `[data-mutate="1"]` buttons disable on offline and pause, enable on online and resume. The fake DOM is seeded from real static ids. A missing id stays null. Pause click, mesh keyup (hides a non-matching node), and OTA change (writes the file name) are dispatched |
 
 **Counts:** executed 16 · blocked 0.
 
@@ -93,9 +95,7 @@ Each item below is fixed in `9e25b7a1c6596a7ff12b101c032ada6bc882aa84`. None are
 | P2 local C2 success renders `C2 FAIL` | fixed | Local success emits `{ ok: true, status: 'ok', action, target, result }`. The Glass Pane treats that envelope, and a string `result` with no error, as `C2 OK`. Listeners stay registered in the harness. |
 | P2 distinct nonces | fixed | `csp-headers.test.js` compares two authenticated responses. |
 
-`GET /login` is the only unauthenticated UI page. It is the operator key form. It contains no key and no fleet data. Everything else on the UI returns 401 without the session cookie.
-
-Client scripts under `core/` still default their own outbound key to the public literal when `WATCHTOWER_API_KEY` is unset. Those processes are not the API or the UI. The API now refuses that literal, so the fallback cannot authenticate. They were not changed in this pass.
+At `9e25b7a`, `GET /login` was the only unauthenticated UI page and `GET /` returned 401. Hub client scripts under `core/` still fell back to a public literal when `WATCHTOWER_API_KEY` was unset. Both of those are changed in `f0cde0ba2804833220c85eadf04f44bac66bf507`, recorded below.
 
 ## Fleet-data GET and WebSocket auth
 
@@ -151,3 +151,25 @@ Not paper rows. Same VM, same node, exit 0:
 No live key, token, or credential is printed. Tests use a 35-character placeholder that is not a built-in literal and is not written in this receipt. Hidden/bidi Unicode scan of source: 0 hits. `watchtower.html` no longer contains `YOUR_SECRET_API_KEY_HERE`. `serve_ui.js` does not substitute a key into HTML.
 
 AUTH-01 HOLD · no deploy · no Contabo.
+
+## Independent review close (tip 113287d NOT_GRADE_A)
+
+Each item below is fixed in `f0cde0ba2804833220c85eadf04f44bac66bf507`. None are left as documentation-only. No 2FA/TOTP and no audit log were added.
+
+| Item | Status | What changed |
+|------|--------|----------------|
+| P1 malformed cookie crashes the UI | fixed | `readCookieHeader` catches `decodeURIComponent`. A bad cookie is HTTP 400 `{ error: "Bad request" }` with no stack and no path. The WebSocket upgrade writes 400 and destroys the socket. The Express error handler returns a generic JSON body. HTTP and upgrade tests use `wt_session=%E0%A4%A` and confirm the process still serves `/login`. |
+| P1 `.env.example` key is accepted | fixed | `generate_a_secure_random_key_here` is a built-in placeholder. Any value equal to a literal in an example or template file is also rejected, on the API and the UI, before the length check. Startup logs the reason and not the key. |
+| P2 tests rewrite `data/infrastructure.json` | fixed | `WATCHTOWER_DATA_DIR` selects the data directory. `startApi` points it at a temp directory. The auth test compares the repo `data/` files before and after and does not write them. |
+| Origin check on proxied writes | fixed | `POST`/`PUT`/`PATCH`/`DELETE` through the UI proxy require an `Origin` or `Referer` of the request host or `WATCHTOWER_UI_ORIGIN`. A missing origin is 403. |
+| Login throttle | fixed | Per-IP backoff starts on the fifth failure (1s, doubling, cap 60s). The next attempt in that window is 429. |
+| Logout, expiry, reaping | fixed | `POST /logout` deletes the token and sets `Max-Age=0`. Sessions expire after `WATCHTOWER_UI_SESSION_MS` (default 8h). Login reaps expired sessions and caps the map at 32. |
+| Secure cookie | fixed | `WATCHTOWER_UI_COOKIE_SECURE=1` adds `Secure`. `0` forces it off. Otherwise `Secure` follows an `https://` `WATCHTOWER_UI_ORIGIN`. |
+| UI proxy default port | fixed | Default `WATCHTOWER_API_PORT` is `3000`, the same as `backend` / `.env.example`. |
+| `GET /` when logged out | fixed | No session redirects to `/login` (302). A malformed cookie on `/` is still 400. |
+| Auto-remediate allowlist | fixed | Ingest calls `assertC2Command` before queueing. An unknown host is not queued. An enrolled host in a mapped group is queued only when the profile has `purge`. |
+| Vacuous `ALLOWLIST=0` test | fixed | The test keeps a valid on-disk allowlist with a mapped group and no purge cap. The deny is `DENY_PURGE_WITHOUT_CAP`. The log does not say `fail-closed empty map`. |
+| Harness checks that were hard-coded true | fixed | `getElementById` returns null unless the id is in `watchtower.html`. Mesh keyup hides a non-matching `.mesh-node`. OTA change writes the selected file name into the label. |
+| Core client public key fallback | fixed | Hub clients call `core/operator_key.py` and exit 1 when the key is unset, empty, a public placeholder, or shorter than 32 characters. `watchtower_beacon.py` without a key exits 1. The AD sensor script does the same. |
+
+`GET /login` remains the operator key form. It contains no key and no fleet data. `GET /` redirects there when the cookie is absent. Other UI routes return 401 without a session, or 400 when the cookie header cannot be decoded.
