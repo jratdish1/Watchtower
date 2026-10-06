@@ -33,12 +33,12 @@ Working directory for every command: repository root.
 | `node backend/test/c2-socket.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/xss-static.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/csp-headers.test.js` | 0 | 34 | 0 | 0 |
-| `node frontend/test/ui-auth.test.js` | 0 | 83 | 0 | 0 |
+| `node frontend/test/ui-auth.test.js` | 0 | 84 | 0 | 0 |
 | `node frontend/test/step5-harness.test.js` | 0 | 62 | 0 | 0 |
 
 Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=62 failed=0 skipped=0`
 
-Combined checks: **358 passed, 0 failed, 0 skipped.** Auth is 138 (startup refusal, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, read-only beacon GET, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 83. Step 5 is 62. Allowlist 19, socket 11, XSS 11.
+Combined checks: **359 passed, 0 failed, 0 skipped.** Auth is 138 (startup refusal, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, read-only beacon GET, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 84. Step 5 is 62. Allowlist 19, socket 11, XSS 11.
 
 ## Step 5 matrix (16)
 
@@ -183,7 +183,7 @@ Each item below is fixed in `46dc8556fb28d8ca934113423f3faa72dd0e74af`. No 2FA/T
 | Item | Status | What changed |
 |------|--------|----------------|
 | P1 `WATCHTOWER_DATA_DIR` follows cwd | fixed | Relative values resolve with `path.resolve(__dirname, '..', value)`. Starting from `backend/` with `./data` uses repo-root `data/` and does not create `backend/data`. Absolute paths, including the test temp dir, stay absolute. |
-| WebSocket Origin | fixed | The upgrade path uses the same Origin/Referer check as a proxied write and writes 403 before any 101. |
+| WebSocket Origin | fixed | The upgrade path uses the same Origin/Referer check as a proxied write and writes 403 before any 101. Matching, missing, and mismatched origins are covered. The missing-Origin case is `35cb2f054496b112e5ef8738c757bbfc11cb28ee`. |
 | Sockets survive logout and expiry | fixed | Open upgrade sockets are tracked per session and destroyed on `POST /logout` and when the session timer fires. |
 | `GET /api/v2/c2/beacon` mutates | fixed | GET only returns a copy of the queue. POST enrolls a new host and clears the queue. The Python beacon and the AD sensor POST. A cross-origin GET cannot empty the queue. |
 | API error handler always returned 500 | fixed | A 4xx `err.status` or `err.statusCode` is returned as that status with a generic body. Malformed JSON is 400 `{ error: "Bad request" }` and the body has no stack. |
