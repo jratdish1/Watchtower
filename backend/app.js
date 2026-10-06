@@ -2,8 +2,11 @@ const express = require('express');
 const http = require('http');
 const crypto = require('crypto');
 const cors = require('cors'); 
+const fs = require('fs');
+const path = require('path');
 const { exec } = require('child_process');
 const { Server } = require('socket.io');
+const { keysEqual } = require('./auth');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,7 +26,7 @@ const BIND_ADDRESS = process.env.WATCHTOWER_BIND_ADDRESS || '0.0.0.0';
 const API_KEY = process.env.WATCHTOWER_API_KEY || "WATCHTOWER_DEFAULT_KEY"; 
 let c2Queue = {};
 
-console.log(`[Watchtower Command Center] Active API Key: ${API_KEY}`);
+console.log(`[Watchtower Command Center] Operator API key ${process.env.WATCHTOWER_API_KEY ? 'loaded from environment' : 'using built-in placeholder'}`);
 console.log(`[Watchtower API Gateway] Listening on ${BIND_ADDRESS}:${port}`);
 
 app.use(cors());
@@ -46,9 +49,6 @@ app.use((req, res, next) => {
 // ------------------------------------------------------------------
 // IN-MEMORY DATABASE (MVP)
 // ------------------------------------------------------------------
-
-const fs = require('fs');
-const path = require('path');
 
 const allowlist = require('./allowlist');
 
@@ -110,8 +110,8 @@ function registerAsset(source, ip) {
 // ------------------------------------------------------------------
 
 io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
-    if (token === API_KEY) {
+    const token = socket.handshake.auth && socket.handshake.auth.token;
+    if (keysEqual(token, API_KEY)) {
         return next();
     }
     console.warn(`[WebSocket Auth] Blocked unauthorized connection attempt from ${socket.id}`);
@@ -133,6 +133,17 @@ io.on('connection', (socket) => {
 
     
     socket.on('c2_command', (cmd) => {
+    if (!cmd || typeof cmd !== 'object' || Array.isArray(cmd) || typeof cmd.action !== 'string') {
+        socket.emit('c2_result', {
+            ok: false,
+            error: 'invalid_c2_action',
+            rule: 'INVALID_C2_ACTION',
+            action: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.action : undefined,
+            target: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.target : undefined,
+            host: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.host : undefined
+        });
+        return;
+    }
     console.log(`[C2 COMMAND RECEIVED] Action: ${cmd.action}, Target: ${cmd.target}, Host: ${cmd.host}`);
 
     // Allowlist adapter: host-scoped deny for unmapped/missing/wrong-profile/audit
@@ -202,16 +213,24 @@ socket.on('disconnect', () => {
 // ------------------------------------------------------------------
 const authenticate = (req, res, next) => {
     const clientKey = req.headers['x-api-key'];
-    if (req.method === 'GET' && (req.path === '/api/alerts' || req.path.startsWith('/api/memory/search'))) {
+    // GET /api/alerts and GET /api/agents use this same check (no GET bypass).
+    // /api/memory/search stays on its existing GET bypass.
+    if (req.method === 'GET' && req.path.startsWith('/api/memory/search')) {
         return next();
     }
 
-    if (!clientKey || clientKey !== API_KEY) {
-        console.warn(`[Auth Failure] IP: ${req.ip}. Received Key: '${clientKey ? clientKey.substring(0,5)+'...' : 'None'}'`);
+    if (!keysEqual(clientKey, API_KEY)) {
+        console.warn(`[Auth Failure] IP: ${req.ip}. Missing or invalid API key.`);
         return res.status(401).json({ error: 'Unauthorized: Invalid or missing API Key' });
     }
     next();
 };
+
+/** §5 rule 9. Returns true when the response is already a coded purge deny. */
+function denyPurgeWithoutCap(res) {
+    if (!allowlist.isEnabled()) return false;
+    return allowlist.sendHttpDeny(res, allowlist.assertPurgeCapability());
+}
 
 // ------------------------------------------------------------------
 // ROUTES - API V1 (Legacy Support)
@@ -220,7 +239,7 @@ app.get('/api/v1/heartbeat', (req, res) => {
     res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-app.get('/api/agents', (req, res) => {
+app.get('/api/agents', authenticate, (req, res) => {
     res.json([{ id: 'mac-studio', hostname: 'Austins-Mac-mini.local', status: 'online', last_seen: new Date().toISOString() }]);
 });
 
@@ -241,7 +260,7 @@ app.post('/api/alerts', authenticate, (req, res) => {
     res.status(201).json({ status: 'received', id: enrichedAlert.id });
 });
 
-app.get('/api/alerts', (req, res) => {
+app.get('/api/alerts', authenticate, (req, res) => {
     res.json(alertsDB);
 });
 
@@ -263,6 +282,7 @@ app.post('/api/v2/infrastructure', authenticate, (req, res) => {
 });
 
 app.delete('/api/v2/infrastructure', authenticate, (req, res) => {
+    if (denyPurgeWithoutCap(res)) return;
     const infraPath = path.join(__dirname, '../data/infrastructure.json');
     if (fs.existsSync(infraPath)) fs.unlinkSync(infraPath);
     res.json({ status: 'ok', msg: 'Infrastructure cleared.' });
@@ -288,6 +308,7 @@ app.get('/api/v2/topology', authenticate, (req, res) => {
 });
 
 app.delete('/api/v2/topology', authenticate, (req, res) => {
+    if (denyPurgeWithoutCap(res)) return;
     const topoPath = path.join(__dirname, '../data/detailed_network_topology.csv');
     const jsonPath = path.join(__dirname, '../data/historical_topology.json');
     if (fs.existsSync(topoPath)) fs.unlinkSync(topoPath);

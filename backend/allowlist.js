@@ -43,6 +43,8 @@ const DEFAULT_SEED = {
     destructive_actions: ['kill', 'lock_dir', 'quarantine', 'disable_user'],
     audit_blocked_actions: ['kill'],
   },
+  // Fail closed: no profile has purge until the file lists it explicitly.
+  profile_capabilities: {},
 };
 
 let _config = null;
@@ -69,6 +71,7 @@ function denyAllConfig(reason) {
     host_group_to_profiles: {},
     ota: { allow_all: false },
     c2: { destructive_actions: [], audit_blocked_actions: [] },
+    profile_capabilities: {},
     _loadError: reason || 'deny_all',
   };
 }
@@ -83,7 +86,9 @@ function validateAndNormalize(raw) {
   }
   const mapIn = raw.host_group_to_profiles;
   if (mapIn === undefined || mapIn === null) {
-    // Empty map is valid (deny all groups)
+    // Empty map is valid (deny all groups). Capabilities still parse; bad shape fail-closes.
+    const capsResult = normalizeProfileCapabilities(raw.profile_capabilities);
+    if (!capsResult.ok) return capsResult;
     return {
       ok: true,
       cfg: {
@@ -94,6 +99,7 @@ function validateAndNormalize(raw) {
           audit_blocked_actions: [],
           ...(raw.c2 && typeof raw.c2 === 'object' ? {} : {}),
         },
+        profile_capabilities: capsResult.profile_capabilities,
       },
     };
   }
@@ -118,6 +124,8 @@ function validateAndNormalize(raw) {
   if (c2Raw.audit_blocked_actions !== undefined && !Array.isArray(c2Raw.audit_blocked_actions)) {
     return { ok: false, reason: 'c2.audit_blocked_actions_not_array' };
   }
+  const capsResult = normalizeProfileCapabilities(raw.profile_capabilities);
+  if (!capsResult.ok) return capsResult;
   return {
     ok: true,
     cfg: {
@@ -131,8 +139,30 @@ function validateAndNormalize(raw) {
           ? c2Raw.audit_blocked_actions.slice()
           : DEFAULT_SEED.c2.audit_blocked_actions.slice(),
       },
+      profile_capabilities: capsResult.profile_capabilities,
     },
   };
+}
+
+/**
+ * profile_capabilities: { "<profile_id>": ["purge", ...] }
+ * Absent → {} (nobody can purge). Bad shape → caller fail-closes the whole file.
+ */
+function normalizeProfileCapabilities(raw) {
+  if (raw === undefined || raw === null) {
+    return { ok: true, profile_capabilities: {} };
+  }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, reason: 'profile_capabilities_not_object' };
+  }
+  const profile_capabilities = {};
+  for (const [profileId, caps] of Object.entries(raw)) {
+    if (!Array.isArray(caps) || !caps.every((c) => typeof c === 'string')) {
+      return { ok: false, reason: `profile_capabilities_not_string_array:${profileId}` };
+    }
+    profile_capabilities[profileId] = caps.slice();
+  }
+  return { ok: true, profile_capabilities };
 }
 
 /**
@@ -340,6 +370,45 @@ function assertPolicyGroupWrite(group, groupDB, profileId) {
   return assertProfileAllowed(group, profileId);
 }
 
+/** Explicit allowlist capability. Unset profile or missing list → false (fail closed). */
+function profileHasCapability(cap, profileId) {
+  const cfg = loadConfig();
+  const pid = profileId === undefined ? getOperatorProfileId() : profileId;
+  if (!pid || !cap) return false;
+  const list = cfg.profile_capabilities && cfg.profile_capabilities[pid];
+  if (!Array.isArray(list)) return false;
+  const want = String(cap).toLowerCase();
+  return list.some((c) => String(c).toLowerCase() === want);
+}
+
+/**
+ * Purge verbs plus the configured destructive C2 list.
+ * Non-strings are not destructive (caller rejects them before execution).
+ */
+function isPurgeOrDestructiveAction(action) {
+  if (typeof action !== 'string' || action.length === 0) return false;
+  const a = action.toLowerCase();
+  const cfg = loadConfig();
+  const list = (cfg.c2 && cfg.c2.destructive_actions) || [];
+  if (list.some((x) => String(x).toLowerCase() === a)) return true;
+  return a === 'purge' || a.startsWith('purge_') || a === 'wipe' || a === 'destroy' || a === 'clear';
+}
+
+/**
+ * Paper §5 rule 9. Deny unless this operator profile lists capability "purge".
+ * Unset profile denies (fail closed) — does not fall open.
+ */
+function assertPurgeCapability(profileId) {
+  const pid = profileId === undefined ? getOperatorProfileId() : profileId;
+  if (!profileHasCapability('purge', pid)) {
+    return makeDeny('DENY_PURGE_WITHOUT_CAP', {
+      profileId: pid || null,
+      reason: pid ? 'purge_capability_absent' : 'operator_profile_unset',
+    });
+  }
+  return null;
+}
+
 function assertC2Command(cmd, deviceGroups, groupDB, profileId) {
   if (!cmd || !cmd.host) {
     return makeDeny('DENY_MISSING_HOST_GROUP', { host: cmd && cmd.host });
@@ -350,7 +419,7 @@ function assertC2Command(cmd, deviceGroups, groupDB, profileId) {
   const { group } = resolveHostGroup(cmd.host, deviceGroups);
   const policy = (groupDB && groupDB[group]) || {};
   const cfg = loadConfig();
-  const action = (cmd.action || '').toLowerCase();
+  const action = typeof cmd.action === 'string' ? cmd.action.toLowerCase() : '';
 
   if (policy.WATCHTOWER_AUDIT_MODE === true) {
     const blocked = (cfg.c2 && cfg.c2.audit_blocked_actions) || ['kill'];
@@ -365,6 +434,12 @@ function assertC2Command(cmd, deviceGroups, groupDB, profileId) {
   // ENABLE_ROLLBACK gate for rollback-class actions
   if (action === 'rollback' && policy.ENABLE_ROLLBACK === false) {
     return makeDeny('DENY_C2_ACTION_NOT_ALLOWED', { action, reason: 'ENABLE_ROLLBACK=false' });
+  }
+
+  // §5 rule 9: destructive / purge C2 requires an explicit purge capability.
+  if (isPurgeOrDestructiveAction(typeof cmd.action === 'string' ? cmd.action : '')) {
+    const purgeDeny = assertPurgeCapability(profileId);
+    if (purgeDeny) return purgeDeny;
   }
 
   return null;
@@ -409,6 +484,9 @@ module.exports = {
   assertReassign,
   assertPolicyGroupWrite,
   assertC2Command,
+  profileHasCapability,
+  isPurgeOrDestructiveAction,
+  assertPurgeCapability,
   sendHttpDeny,
   socketDenyPayload,
 };

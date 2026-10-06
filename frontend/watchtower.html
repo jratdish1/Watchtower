@@ -293,13 +293,13 @@
     <header>
         <h1>
             Watchtower Command
-            <button data-mutate="1" onclick="openOtaModal()" style="background:rgba(255, 100, 0, 0.1); border:1px solid #ff6400; color:#ff6400; font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">🚀 Deploy OTA</button>
-            <button onclick="openPolicyModal()" style="background:rgba(0,240,255,0.1); border:1px solid var(--accent); color:var(--accent); font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">⚙️ Fleet Policies</button>
-            <button onclick="openInfraModal()" style="background:rgba(16, 185, 129, 0.1); border:1px solid var(--success); color:var(--success); font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">🗺️ Infrastructure</button>
+            <button id="fe-open-ota" data-mutate="1" style="background:rgba(255, 100, 0, 0.1); border:1px solid #ff6400; color:#ff6400; font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">🚀 Deploy OTA</button>
+            <button id="fe-open-policy" style="background:rgba(0,240,255,0.1); border:1px solid var(--accent); color:var(--accent); font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">⚙️ Fleet Policies</button>
+            <button id="fe-open-infra" style="background:rgba(16, 185, 129, 0.1); border:1px solid var(--success); color:var(--success); font-family:'Fira Code'; font-size:0.75rem; padding:6px 12px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold; transition:all 0.2s;">🗺️ Infrastructure</button>
         </h1>
         <div class="status-container">
             <div style="display:flex; align-items:center; gap:10px;">
-                <button id="fe-pause-btn" onclick="toggleOperatorPause()" title="Operator pause (local)" style="background:rgba(245,158,11,0.1); border:1px solid var(--warning); color:var(--warning); font-family:'Fira Code'; font-size:0.65rem; padding:6px 10px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold;">Pause</button>
+                <button id="fe-pause-btn" title="Operator pause (local)" style="background:rgba(245,158,11,0.1); border:1px solid var(--warning); color:var(--warning); font-family:'Fira Code'; font-size:0.65rem; padding:6px 10px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold;">Pause</button>
                 <div class="status-indicator" id="connection-status-box" data-state="conn.offline_initial" data-state-at="">
                     <div class="pulse" id="connection-pulse"></div>
                     <span id="connection-status">DISCONNECTED</span>
@@ -318,7 +318,7 @@
         <div class="panel panel-matrix">
             <div class="panel-header">
                 <span id="matrix-title" style="font-size: 1rem; color: var(--text);">Security Matrix [Global]</span>
-                <button id="clear-filter-btn" class="clear-filter-btn" style="display:none;" onclick="clearDeviceFilter()">&#x2715; Clear Node Filter</button>
+                <button id="clear-filter-btn" class="clear-filter-btn" style="display:none;">&#x2715; Clear Node Filter</button>
             </div>
             <div class="panel-content" id="alert-matrix-container">
                 <div id="alert-matrix-empty" class="empty-state">
@@ -336,7 +336,7 @@
             <div class="panel-header" style="background: rgba(0, 0, 0, 0.2);">
                 <span>Active Mesh [Node Fleet]</span>
                 <div class="mesh-header-controls">
-                     <input type="text" id="mesh-search" class="search-bar" onkeyup="filterMesh()" placeholder="Search Hostname or IP...">
+                     <input type="text" id="mesh-search" class="search-bar" placeholder="Search Hostname or IP...">
                 </div>
             </div>
             <div class="panel-content">
@@ -353,7 +353,7 @@
             <div class="panel-header" style="background: rgba(0, 0, 0, 0.2);">
                 <span>App Inventory / Usage Tracking</span>
                 <div class="mesh-header-controls">
-                     <input type="text" id="inv-search" class="search-bar" onkeyup="filterInventory()" placeholder="App, Hash, or User...">
+                     <input type="text" id="inv-search" class="search-bar" placeholder="App, Hash, or User...">
                 </div>
             </div>
             <div class="panel-content">
@@ -385,7 +385,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2>AI_INSPECTOR // DEEP DIVE</h2>
-                <button class="close-btn" onclick="closeModal()">&#x2715;</button>
+                <button id="fe-close-inspector" class="close-btn">&#x2715;</button>
             </div>
             <div id="inspector-body"></div>
         </div>
@@ -396,14 +396,14 @@
         <div class="modal-content" style="max-width: 900px;">
             <div class="modal-header">
                 <h2>FLEET POLICY CONFIGURATION</h2>
-                <button class="close-btn" onclick="document.getElementById('policy-modal').classList.remove('active')">&#x2715;</button>
+                <button id="fe-close-policy" class="close-btn">&#x2715;</button>
             </div>
             <div style="display:flex; height: 500px; overflow:hidden;">
                 <div style="flex: 1; border-right: 1px solid var(--border); padding: 20px; overflow-y:auto; background:rgba(0,0,0,0.2);">
                     <h3 style="color:var(--text-dim); font-size:0.8rem; text-transform:uppercase;">Host Groups</h3>
                     <div id="group-list" style="display:flex; flex-direction:column; gap:8px; margin-top:12px;"></div>
                     <input type="text" id="new-group-name" class="search-bar" placeholder="New Group..." style="margin-top:16px;">
-                    <button data-mutate="1" onclick="createGroup()" style="width:100%; padding:8px; margin-top:8px; background:var(--accent); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">+ Create Group</button>
+                    <button id="fe-create-group" data-mutate="1" style="width:100%; padding:8px; margin-top:8px; background:var(--accent); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">+ Create Group</button>
                 </div>
                 
                 <div style="flex: 1.5; padding: 20px; overflow-y:auto;">
@@ -411,7 +411,7 @@
                     <div id="policy-toggles" style="display:flex; flex-direction:column; gap:16px; margin-top:20px;">
                         <!-- Toggles rendered dynamically -->
                     </div>
-                    <button data-mutate="1" id="fe-save-policy-btn" onclick="savePolicy()" style="width:100%; padding:12px; margin-top:32px; background:var(--success); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Deploy Policy to Group</button>
+                    <button data-mutate="1" id="fe-save-policy-btn" style="width:100%; padding:12px; margin-top:32px; background:var(--success); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Deploy Policy to Group</button>
                 </div>
                 
                 <div style="flex: 1.5; border-left: 1px solid var(--border); padding: 20px; overflow-y:auto; background:rgba(0,0,0,0.2);">
@@ -429,7 +429,7 @@
         <div class="modal-content" style="max-width: 600px; text-align:center;">
             <div class="modal-header">
                 <h2>OVER-THE-AIR (OTA) FLEET DEPLOYMENT</h2>
-                <button class="close-btn" onclick="document.getElementById('ota-modal').classList.remove('active')">&#x2715;</button>
+                <button id="fe-close-ota" class="close-btn">&#x2715;</button>
             </div>
             <p style="color:var(--text-dim); margin-bottom:20px; font-size:0.9rem;">Upload a compressed <span style="color:var(--warning)">core.zip</span> to autonomously patch and securely restart remote endpoints via HMAC validation.</p>
             
@@ -440,14 +440,14 @@
             </div>
 
             <div style="border: 2px dashed var(--border); border-radius:12px; padding:40px; background:rgba(0,0,0,0.3); margin-bottom: 20px;">
-                <input type="file" id="ota-file-input" accept=".zip" style="display:none;" onchange="updateOtaLabel()">
+                <input type="file" id="ota-file-input" accept=".zip" style="display:none;">
                 <label for="ota-file-input" style="cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:16px;">
                     <span style="font-size:2rem;">📦</span>
                     <span id="ota-file-label" style="font-family:'Fira Code'; font-weight:bold; color:var(--accent);">Select core.zip payload...</span>
                 </label>
             </div>
             
-            <button onclick="deployOta()" data-mutate="1" id="ota-deploy-btn" style="width:100%; padding:12px; background:var(--warning); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer; text-transform:uppercase; transition:all 0.2s;">Transmit OTA Payload</button>
+            <button data-mutate="1" id="ota-deploy-btn" style="width:100%; padding:12px; background:var(--warning); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer; text-transform:uppercase; transition:all 0.2s;">Transmit OTA Payload</button>
         </div>
     </div>
     <!-- Infrastructure Modal -->
@@ -455,7 +455,7 @@
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
                 <h2>L2 TOPOGRAPHY SCUBA</h2>
-                <button class="close-btn" onclick="document.getElementById('infra-modal').classList.remove('active')">&#x2715;</button>
+                <button id="fe-close-infra" class="close-btn">&#x2715;</button>
             </div>
             <div style="padding: 24px; padding-bottom: 0;">
                 <p style="color:var(--text-dim); margin-bottom:20px; font-size:0.9rem;">Inject SSH credentials for core switches. Watchtower will securely vault these and autonomously construct L2 Topologies via the Edge Scraper.</p>
@@ -463,7 +463,7 @@
                     <input type="text" id="infra-ip" class="search-bar" placeholder="Switch IP (e.g. 10.1.1.5)">
                     <input type="text" id="infra-user" class="search-bar" placeholder="SSH Username">
                     <input type="password" id="infra-pass" class="search-bar" placeholder="SSH Password / Key Passphrase">
-                    <button data-mutate="1" onclick="saveInfrastructure()" style="padding:10px; background:var(--success); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Securely Inject Credentials</button>
+                    <button id="fe-save-infra" data-mutate="1" style="padding:10px; background:var(--success); color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer;">Securely Inject Credentials</button>
                 </div>
             </div>
             
@@ -471,8 +471,8 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <h3 style="color:var(--text-dim); font-size:0.8rem; text-transform:uppercase; margin:0;">Discovered Topography Maps</h3>
                     <div style="display:flex; gap:8px;">
-                        <button data-mutate="1" onclick="clearInfrastructure()" style="background:rgba(255,42,95,0.1); border:1px solid var(--danger); color:var(--danger); padding:4px 8px; border-radius:4px; font-size:0.6rem; cursor:pointer; font-weight:bold;">PURGE VAULT</button>
-                        <button data-mutate="1" onclick="clearTopology()" style="background:rgba(251,191,36,0.1); border:1px solid var(--warning); color:var(--warning); padding:4px 8px; border-radius:4px; font-size:0.6rem; cursor:pointer; font-weight:bold;">CLEAR MAPS</button>
+                        <button id="fe-purge-vault" data-mutate="1" style="background:rgba(255,42,95,0.1); border:1px solid var(--danger); color:var(--danger); padding:4px 8px; border-radius:4px; font-size:0.6rem; cursor:pointer; font-weight:bold;">PURGE VAULT</button>
+                        <button id="fe-clear-maps" data-mutate="1" style="background:rgba(251,191,36,0.1); border:1px solid var(--warning); color:var(--warning); padding:4px 8px; border-radius:4px; font-size:0.6rem; cursor:pointer; font-weight:bold;">CLEAR MAPS</button>
                     </div>
                 </div>
                 <div id="topo-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:12px; margin-top:12px; max-height: 200px; overflow-y:auto;">
@@ -534,6 +534,7 @@
             allowlist_wrong_group: 'CROSS-GROUP DENIED',
             allowlist_reassign_unmapped: 'REASSIGN TARGET UNMAPPED',
             allowlist_purge_denied: 'PURGE DENIED',
+            allowlist_purge_no_cap: 'PURGE DENIED',
             allowlist_orphan_group: 'ORPHAN GROUP CREATE DENIED'
         };
 
@@ -681,12 +682,18 @@
 
         function extractAllowlistCode(payload) {
             if (!payload) return null;
-            const code = payload.code || payload.error_code || payload.error || (typeof payload === 'string' ? payload : null);
+            const nested = payload.result && typeof payload.result === 'object' ? payload.result : null;
+            const code = payload.code || payload.error_code || payload.error
+                || (nested && (nested.code || nested.error_code || nested.error))
+                || (typeof payload === 'string' ? payload : null);
             if (code && ALLOWLIST_CODES[code]) return code;
             if (payload.error && ALLOWLIST_CODES[payload.error]) return payload.error;
-            if (typeof payload.message === 'string') {
+            const messages = [];
+            if (typeof payload.message === 'string') messages.push(payload.message);
+            if (nested && typeof nested.message === 'string') messages.push(nested.message);
+            for (const message of messages) {
                 for (const k of Object.keys(ALLOWLIST_CODES)) {
-                    if (payload.message.indexOf(k) !== -1) return k;
+                    if (message.indexOf(k) !== -1) return k;
                 }
             }
             return null;
@@ -1462,8 +1469,35 @@
             document.getElementById('new-group-name').value = '';
         }
 
-        // Mark header mutate affordances after DOM ready
-        document.querySelectorAll('#ota-deploy-btn, [onclick*="saveInfrastructure"]').forEach(el => el.setAttribute('data-mutate', '1'));
+        // Static controls used to be inline on*="" handlers. CSP script-src has no
+        // 'unsafe-inline', so they are bound here inside the nonce'd script.
+        function bindClick(id, fn) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', fn);
+        }
+        bindClick('fe-open-ota', () => openOtaModal());
+        bindClick('fe-open-policy', () => openPolicyModal());
+        bindClick('fe-open-infra', () => openInfraModal());
+        bindClick('fe-pause-btn', () => toggleOperatorPause());
+        bindClick('clear-filter-btn', () => clearDeviceFilter());
+        bindClick('fe-close-inspector', () => closeModal());
+        bindClick('fe-close-policy', () => document.getElementById('policy-modal').classList.remove('active'));
+        bindClick('fe-create-group', () => createGroup());
+        bindClick('fe-save-policy-btn', () => savePolicy());
+        bindClick('fe-close-ota', () => document.getElementById('ota-modal').classList.remove('active'));
+        bindClick('ota-deploy-btn', () => deployOta());
+        bindClick('fe-close-infra', () => document.getElementById('infra-modal').classList.remove('active'));
+        bindClick('fe-save-infra', () => saveInfrastructure());
+        bindClick('fe-purge-vault', () => clearInfrastructure());
+        bindClick('fe-clear-maps', () => clearTopology());
+        const meshSearch = document.getElementById('mesh-search');
+        if (meshSearch) meshSearch.addEventListener('keyup', () => filterMesh());
+        const invSearch = document.getElementById('inv-search');
+        if (invSearch) invSearch.addEventListener('keyup', () => filterInventory());
+        const otaFile = document.getElementById('ota-file-input');
+        if (otaFile) otaFile.addEventListener('change', () => updateOtaLabel());
+
+        document.querySelectorAll('#ota-deploy-btn, #fe-save-infra').forEach(el => el.setAttribute('data-mutate', '1'));
         refreshMutateGates();
     </script>
 </body>

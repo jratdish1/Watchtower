@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Allowlist adapter
+        run: node backend/test/allowlist.test.js
+      - name: Operator API auth and purge cap
+        run: node backend/test/auth.test.js
+      - name: Socket c2 guard
+        run: node backend/test/c2-socket.test.js
+      - name: FE XSS static guard
+        run: node frontend/test/xss-static.test.js
+      - name: Glass Pane security headers
+        run: node frontend/test/csp-headers.test.js
+      - name: Step 5 isolated harness
+        run: node frontend/test/step5-harness.test.js
