@@ -12,9 +12,10 @@
 | | SHA |
 |--|-----|
 | base (`main` at branch point) | `383964e7851330ebe3d66ad1eb0fd0371f9b984f` |
-| head (implementation commit, `git rev-parse HEAD` before this stamp) | `ee8fd38a1bc0bda3e37d13a1540f2d9a99841cd9` |
+| implementation (`git rev-parse HEAD` of the code + test log) | `ee8fd38a1bc0bda3e37d13a1540f2d9a99841cd9` |
+| head (branch tip that recorded the implementation id) | `97289fa8a48e575bde58dc76f33b63c584d03de7` |
 
-The implementation commit `ee8fd38a1bc0bda3e37d13a1540f2d9a99841cd9` is the tree the commands above ran against, plus this receipt with a placeholder head line. This stamp records that full id. The pull request description repeats `git rev-parse HEAD` of the branch tip after push; that tip is authoritative for the PR head. A commit object cannot contain its own id.
+Commands above were run on the implementation tree `ee8fd38a1bc0bda3e37d13a1540f2d9a99841cd9`. Commit `97289fa8a48e575bde58dc76f33b63c584d03de7` is the branch tip that wrote that id into this receipt. A commit object cannot contain its own id, so if `git rev-parse HEAD` is a child of `97289fa8a48e575bde58dc76f33b63c584d03de7`, that child only records this line and the pull request description repeats the child id. The pull request description is updated to the exact `git rev-parse HEAD` after the final push.
 
 Working directory for every command: repository root.
 
