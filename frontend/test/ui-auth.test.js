@@ -8,6 +8,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const http = require('http');
 const net = require('net');
 const path = require('path');
@@ -216,6 +217,16 @@ function cookiePair(res) {
     check('logout without Origin is forbidden', noOriginLogout.status === 403 && noOriginLogout.json && noOriginLogout.json.error === 'Forbidden', noOriginLogout.body);
     const stillIn = await rawRequest(port, 'GET', '/watchtower.html', { Cookie: cookie });
     check('logout without Origin keeps the session', stillIn.status === 200, String(stillIn.status));
+    const twin = await rawRequest(port, 'GET', '/watchtower.html', { Cookie: cookie + '; ' + cookie });
+    check('duplicate identical wt_session cookies keep the session', twin.status === 200, String(twin.status));
+    const clash = await rawRequest(port, 'GET', '/', { Cookie: cookie + '; wt_session=other-token' });
+    check(
+      'disagreeing wt_session cookies redirect / to /login',
+      clash.status === 302 && clash.headers.location === '/login',
+      String(clash.status) + ' ' + clash.body
+    );
+    const clashPage = await rawRequest(port, 'GET', '/watchtower.html', { Cookie: cookie + '; wt_session=other-token' });
+    check('disagreeing wt_session cookies do not open the UI', clashPage.status === 401, String(clashPage.status));
     const loggedOut = await rawRequest(port, 'POST', '/logout', { Cookie: cookie, Origin: 'http://127.0.0.1:' + port });
     check('POST /logout clears the session', loggedOut.status === 200 && /Max-Age=0/i.test(cookiePair(loggedOut)), cookiePair(loggedOut));
     const afterLogout = await rawRequest(port, 'GET', '/watchtower.html', { Cookie: cookie });
@@ -236,6 +247,12 @@ function cookiePair(res) {
     check('POST /login with a malformed session cookie still succeeds', badLoginPost.status === 200 && /Max-Age=28800/.test(cookiePair(badLoginPost)), String(badLoginPost.status) + ' ' + badLoginPost.body);
     const otherCookie = await rawRequest(port, 'GET', '/login', { Cookie: 'prefs=%E0%A4%A' });
     check('unrelated malformed cookie still serves /login', otherCookie.status === 200, String(otherCookie.status) + ' ' + otherCookie.body);
+    const badRoot = await rawRequest(port, 'GET', '/', { Cookie: 'wt_session=%E0%A4%A' });
+    check(
+      'malformed wt_session on / redirects to /login',
+      badRoot.status === 302 && badRoot.headers.location === '/login' && !leaks(badRoot.body),
+      String(badRoot.status) + ' ' + badRoot.body
+    );
     const otherRoot = await rawRequest(port, 'GET', '/', { Cookie: 'theme=%' });
     check(
       'unrelated malformed cookie still redirects /',
@@ -311,6 +328,11 @@ function cookiePair(res) {
     check('UI proxy refuses beacon GET', beaconProxy.status === 403 && beaconProxy.json && beaconProxy.json.error === 'Forbidden', beaconProxy.body);
     const syncProxy = await rawRequest(uiPort, 'GET', '/api/v2/policies/sync?host=ghost-fixture', { Cookie: cookie });
     check('UI proxy refuses policy sync GET', syncProxy.status === 403 && syncProxy.json && syncProxy.json.error === 'Forbidden', syncProxy.body);
+    const shapedWrite = await rawRequest(uiPort, 'POST', '/API/v2/infrastructure', {
+      Cookie: cookie,
+      'Content-Type': 'application/json',
+    }, '{}');
+    check('state-changing proxy variant without Origin is forbidden', shapedWrite.status === 403 && shapedWrite.json && shapedWrite.json.error === 'Forbidden', shapedWrite.body);
 
     const denied = await new Promise((resolve) => {
       const socket = io('http://127.0.0.1:' + uiPort, {
@@ -433,6 +455,85 @@ function cookiePair(res) {
     api.stop();
   }
 
+  const variantAllow = path.join(os.tmpdir(), 'wt-ui-variant-' + process.pid + '.json');
+  const variantDb = path.join(os.tmpdir(), 'wt-ui-variant-db-' + process.pid + '.json');
+  fs.writeFileSync(variantAllow, JSON.stringify({
+    host_group_to_profiles: { 'Ops-Fleet': ['GitHub vets-ops'] },
+    ota: { allow_all: false },
+    c2: { destructive_actions: ['quarantine'], audit_blocked_actions: [] },
+    profile_capabilities: { 'GitHub vets-ops': ['purge'] },
+  }));
+  fs.writeFileSync(variantDb, JSON.stringify({
+    alerts: [],
+    threats: [],
+    assets: {},
+    groups: { 'Ops-Fleet': { WATCHTOWER_AUDIT_MODE: false } },
+    deviceGroups: { 'ops-1': 'Ops-Fleet' },
+  }));
+  const variantApi = await startApi({
+    WATCHTOWER_API_KEY: TEST_OPERATOR_KEY,
+    WATCHTOWER_ALLOWLIST_PATH: variantAllow,
+    WATCHTOWER_OPERATOR_PROFILE_ID: 'GitHub vets-ops',
+    WATCHTOWER_DB_PATH: variantDb,
+    AUTO_REMEDIATE: 'true',
+  });
+  const variantUiPort = await freePort();
+  const variantUi = spawnUi(variantUiPort, {
+    WATCHTOWER_API_PORT: String(variantApi.port),
+    WATCHTOWER_API_KEY: TEST_OPERATOR_KEY,
+  });
+  try {
+    await variantUi.ready;
+    const ingested = await rawRequest(variantApi.port, 'POST', '/api/v2/ingest/threat', {
+      'Content-Type': 'application/json',
+      'x-api-key': TEST_OPERATOR_KEY,
+    }, JSON.stringify({ source: 'ops-1', ai_verdict: 'MALICIOUS', file_path: '/tmp/fixture', event_type: 'FILE' }));
+    check('variant fixture queued a command', ingested.status === 201, String(ingested.status) + ' ' + ingested.body);
+    const variantSession = await rawRequest(variantUiPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+    }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    const variantCookie = cookiePair(variantSession).split(';')[0];
+    const variants = [
+      ['/api/v2/c2/beacon/', 'trailing slash'],
+      ['/API/v2/c2/beacon', 'uppercase'],
+      ['/api/V2/C2/BEACON', 'mixed case'],
+      ['/api//v2//c2//beacon', 'double slash'],
+      ['/api/v2/c2/%62eacon', 'percent-encoded'],
+      ['/api/foo/../v2/c2/beacon', 'dot-segment'],
+      ['/api/v2/policies/sync/', 'policy sync trailing slash'],
+    ];
+    for (const [urlPath, label] of variants) {
+      const blocked = await rawRequest(variantUiPort, 'GET', urlPath + '?host=ops-1', {
+        Cookie: variantCookie,
+        Origin: 'http://127.0.0.1:9',
+      });
+      check(
+        'proxy ' + label + ' is forbidden',
+        blocked.status === 403 && blocked.json && blocked.json.error === 'Forbidden',
+        blocked.status + ' ' + blocked.body
+      );
+    }
+    const posted = await rawRequest(variantUiPort, 'POST', '/api/v2/c2/beacon/?host=ops-1', {
+      Cookie: variantCookie,
+      Origin: 'http://127.0.0.1:' + variantUiPort,
+      'Content-Type': 'application/json',
+    }, '{}');
+    check('proxy beacon POST with a trailing slash is forbidden', posted.status === 403, posted.status + ' ' + posted.body);
+    const still = await rawRequest(variantApi.port, 'GET', '/api/v2/c2/beacon?host=ops-1', {
+      'x-api-key': TEST_OPERATOR_KEY,
+    });
+    check(
+      'path variants left the beacon queue intact',
+      still.status === 200 && still.json && still.json.commands && still.json.commands.some((c) => c.action === 'quarantine'),
+      JSON.stringify(still.json)
+    );
+  } finally {
+    variantUi.child.kill('SIGTERM');
+    variantApi.stop();
+    try { fs.unlinkSync(variantAllow); } catch (_) {}
+    try { fs.unlinkSync(variantDb); } catch (_) {}
+  }
+
   const throttlePort = await freePort();
   const throttled = spawnUi(throttlePort);
   try {
@@ -524,35 +625,58 @@ function cookiePair(res) {
   const pruned = spawnUi(prunePort, { WATCHTOWER_TRUSTED_PROXY: '127.0.0.1' });
   try {
     await pruned.ready;
+    for (let i = 0; i < 4; i++) {
+      const miss = await rawRequest(prunePort, 'POST', '/login', {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '203.0.113.21',
+      }, JSON.stringify({ key: 'z'.repeat(32) }));
+      check('inactive-row failure ' + (i + 1) + ' is 401', miss.status === 401, String(miss.status));
+    }
+    let fillerOk = true;
+    for (let i = 0; i < 60; i++) {
+      const miss = await rawRequest(prunePort, 'POST', '/login', {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '198.51.100.' + (i + 1),
+      }, JSON.stringify({ key: 'z'.repeat(32) }));
+      if (miss.status !== 401) fillerOk = false;
+    }
+    check('filler login failures stay 401', fillerOk);
     for (let i = 0; i < 5; i++) {
       const miss = await rawRequest(prunePort, 'POST', '/login', {
         'Content-Type': 'application/json',
         'X-Forwarded-For': '203.0.113.20',
       }, JSON.stringify({ key: 'z'.repeat(32) }));
-      check('prune-target failure ' + (i + 1) + ' is 401', miss.status === 401, String(miss.status));
+      check('active-lock failure ' + (i + 1) + ' is 401', miss.status === 401, String(miss.status));
     }
     const locked = await rawRequest(prunePort, 'POST', '/login', {
       'Content-Type': 'application/json',
       'X-Forwarded-For': '203.0.113.20',
     }, JSON.stringify({ key: 'z'.repeat(32) }));
-    check('prune target is throttled before the cap', locked.status === 429, locked.body);
-    let fillerOk = true;
-    for (let i = 0; i < 64; i++) {
-      const miss = await rawRequest(prunePort, 'POST', '/login', {
+    check('active lock is throttled before eviction', locked.status === 429, locked.body);
+    for (let i = 60; i < 63; i++) {
+      await rawRequest(prunePort, 'POST', '/login', {
         'Content-Type': 'application/json',
         'X-Forwarded-For': '198.51.100.' + (i + 1),
       }, JSON.stringify({ key: 'z'.repeat(32) }));
-      if (miss.status !== 401) {
-        fillerOk = false;
-        break;
-      }
     }
-    check('filler login failures stay 401', fillerOk);
-    const afterCap = await rawRequest(prunePort, 'POST', '/login', {
+    const stillLocked = await rawRequest(prunePort, 'POST', '/login', {
       'Content-Type': 'application/json',
       'X-Forwarded-For': '203.0.113.20',
     }, JSON.stringify({ key: 'z'.repeat(32) }));
-    check('login failure map drops the oldest row at the cap', afterCap.status === 401, afterCap.body);
+    check('an active lockout survives the failure-map cap', stillLocked.status === 429, stillLocked.body);
+    const dropped = await rawRequest(prunePort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.21',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    const droppedAgain = await rawRequest(prunePort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.21',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    check(
+      'the cap evicts an inactive row before an active lock',
+      dropped.status === 401 && droppedAgain.status === 401,
+      dropped.status + ' ' + droppedAgain.status
+    );
   } finally {
     pruned.child.kill('SIGTERM');
   }

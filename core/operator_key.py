@@ -12,7 +12,8 @@ MIN_LENGTH = 32
 
 def require_operator_key(name="WATCHTOWER_API_KEY"):
     raw = os.environ.get(name)
-    if raw is None or raw.strip() == "" or raw in FORBIDDEN or len(raw) < MIN_LENGTH:
+    stripped = "" if raw is None else raw.strip()
+    if raw is None or stripped == "" or stripped in FORBIDDEN or len(stripped) < MIN_LENGTH:
         sys.stderr.write(
             "[Watchtower] Refusing to start: "
             + name

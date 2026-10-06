@@ -10,7 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const io = require(path.join(__dirname, '../../frontend/node_modules/socket.io-client'));
-const { startApi, TEST_OPERATOR_KEY } = require('./spawn_api');
+const { request, startApi, TEST_OPERATOR_KEY } = require('./spawn_api');
 
 const KEY = TEST_OPERATOR_KEY;
 let passed = 0;
@@ -107,6 +107,14 @@ function once(socket, event) {
       check('invalid socket key rejected', /Authentication error/i.test(String(err && err.message)));
     }
     check('invalid socket key did not connect', rejected);
+    let paddedRejected = false;
+    try {
+      await connect(api.port, '  generate_a_secure_random_key_here  ');
+    } catch (err) {
+      paddedRejected = true;
+      check('padded placeholder socket key is rejected', /Authentication error/i.test(String(err && err.message)));
+    }
+    check('padded placeholder socket key did not connect', paddedRejected);
 
     socket = await connect(api.port, KEY);
     check('valid socket key connects', socket.connected === true);
@@ -140,6 +148,23 @@ function once(socket, event) {
       'quarantine without purge cap → allowlist_purge_denied',
       purge && purge.allowlist_denied === true && purge.result && purge.result.error === 'allowlist_purge_denied' && purge.result.rule === 'DENY_PURGE_WITHOUT_CAP',
       JSON.stringify(purge)
+    );
+
+    for (const action of ['UPDATE_CORE', 'UPDATE_POLICY']) {
+      const reservedWait = once(socket, 'c2_result');
+      socket.emit('c2_command', { action, target: 'http://evil.example/update_core.zip', host: 'ops-1', hmac: 'abc' });
+      const reserved = await reservedWait;
+      check(
+        action + ' is reserved for the server',
+        reserved && reserved.ok === false && reserved.error === 'invalid_c2_action' && !reserved.allowlist_denied,
+        JSON.stringify(reserved)
+      );
+    }
+    const queued = await request(api.port, 'GET', '/api/v2/c2/beacon?host=ops-1', { 'x-api-key': KEY });
+    check(
+      'reserved socket actions did not queue a command',
+      queued.status === 200 && queued.json && Array.isArray(queued.json.commands) && queued.json.commands.length === 0,
+      JSON.stringify(queued.json)
     );
 
     const again = once(socket, 'c2_result');

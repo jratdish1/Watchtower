@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { Server } = require('socket.io');
-const { keysEqual, requireOperatorKey } = require('./auth');
+const { keysEqual, operatorKeyProblem, requireOperatorKey } = require('./auth');
 const { ipAllowed } = require('./ip_allow');
 
 const app = express();
@@ -57,7 +57,7 @@ const PUBLIC_BASE_URL = process.env.WATCHTOWER_PUBLIC_BASE_URL && String(process
 if (!PUBLIC_BASE_URL) {
     console.warn('[OTA] WATCHTOWER_PUBLIC_BASE_URL is unset. OTA upload is refused so a beacon is not sent a loopback URL.');
 }
-let c2Queue = {};
+let c2Queue = Object.create(null);
 
 console.log('[Watchtower Command Center] Operator API key loaded from environment');
 console.log(`[Watchtower API Gateway] Listening on ${BIND_ADDRESS}:${port}`);
@@ -103,12 +103,26 @@ function takeCommands(host) {
     return commands;
 }
 
+const RESERVED_HOSTS = new Set(['__proto__', 'constructor', 'prototype', 'tostring']);
+
 function parseHost(value) {
     if (typeof value !== 'string') return { status: 400, error: 'Host parameter required' };
     const host = value.trim();
     if (!host) return { status: 400, error: 'Host parameter required' };
-    if (host.length > MAX_HOST_NAME) return { status: 400, error: 'Bad request' };
+    if (host.length > MAX_HOST_NAME || RESERVED_HOSTS.has(host.toLowerCase())) {
+        return { status: 400, error: 'Bad request' };
+    }
     return { host };
+}
+
+function nullHostMap(source) {
+    const map = Object.create(null);
+    if (!source || typeof source !== 'object') return map;
+    Object.keys(source).forEach((key) => {
+        if (RESERVED_HOSTS.has(String(key).toLowerCase())) return;
+        map[key] = source[key];
+    });
+    return map;
 }
 
 /** Queue a beacon command. Destructive verbs require purge capability, even when the group allowlist flag is off. */
@@ -133,8 +147,8 @@ if (!fs.existsSync(path.dirname(DB_FILE))) {
 
 let alertsDB = [];
 let threatDB = [];
-let assetRegistry = {}; // New Device/User Catalog
-let globalInventory = {}; // { Hostname: [ {name, hash, uptime...} ] }
+let assetRegistry = Object.create(null); // New Device/User Catalog
+let globalInventory = Object.create(null); // { Hostname: [ {name, hash, uptime...} ] }
 let groupDB = {
     "Default": {
         "ENABLE_FIM": true, "ENABLE_ORACLE": true, "ENABLE_BEHAVIORAL": true, "ENABLE_DECOY": true,
@@ -142,16 +156,16 @@ let groupDB = {
         "WATCHTOWER_AUDIT_MODE": true
     }
 };
-let deviceGroupMap = {}; // { Hostname: "Group_Name" }
+let deviceGroupMap = Object.create(null); // { Hostname: "Group_Name" }
 
 if (fs.existsSync(DB_FILE)) {
     try {
         const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
         alertsDB = data.alerts || [];
         threatDB = data.threats || [];
-        assetRegistry = data.assets || {};
+        assetRegistry = nullHostMap(data.assets);
         groupDB = data.groups || groupDB;
-        deviceGroupMap = data.deviceGroups || {};
+        deviceGroupMap = nullHostMap(data.deviceGroups);
         console.log(`[Watchtower DB] Loaded ${alertsDB.length} alerts, ${threatDB.length} threats, and ${Object.keys(assetRegistry).length} known assets.`);
     } catch (e) {
         console.error('[Watchtower DB] Failed to load DB, starting fresh.');
@@ -182,9 +196,16 @@ function registerAsset(source, ip) {
 // WEBSOCKETS (Task 1.2)
 // ------------------------------------------------------------------
 
+const OPERATOR_SOCKET_ACTIONS = new Set(['quarantine', 'lock_dir', 'kill', 'disable_user', 'rollback']);
+const RESERVED_QUEUE_ACTIONS = new Set(['update_core', 'update_policy']);
+
 io.use((socket, next) => {
     const headerKey = socket.handshake.headers && socket.handshake.headers['x-api-key'];
     const token = (socket.handshake.auth && socket.handshake.auth.token) || headerKey;
+    if (operatorKeyProblem(token) === 'placeholder') {
+        console.warn(`[WebSocket Auth] Blocked unauthorized connection attempt from ${socket.id}`);
+        return next(new Error('Authentication error'));
+    }
     if (keysEqual(token, API_KEY)) {
         return next();
     }
@@ -207,7 +228,11 @@ io.on('connection', (socket) => {
 
     
     socket.on('c2_command', (cmd) => {
-    if (!cmd || typeof cmd !== 'object' || Array.isArray(cmd) || typeof cmd.action !== 'string') {
+    const actionName = cmd && typeof cmd === 'object' && !Array.isArray(cmd) && typeof cmd.action === 'string'
+        ? cmd.action.trim().toLowerCase()
+        : '';
+    const operatorAction = OPERATOR_SOCKET_ACTIONS.has(actionName) && !RESERVED_QUEUE_ACTIONS.has(actionName);
+    if (!cmd || typeof cmd !== 'object' || Array.isArray(cmd) || !operatorAction) {
         socket.emit('c2_result', {
             ok: false,
             error: 'invalid_c2_action',
@@ -215,6 +240,17 @@ io.on('connection', (socket) => {
             action: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.action : undefined,
             target: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.target : undefined,
             host: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.host : undefined
+        });
+        return;
+    }
+    if (typeof cmd.host === 'string' && RESERVED_HOSTS.has(cmd.host.trim().toLowerCase())) {
+        socket.emit('c2_result', {
+            ok: false,
+            error: 'invalid_c2_action',
+            rule: 'INVALID_C2_ACTION',
+            action: cmd.action,
+            target: cmd.target,
+            host: cmd.host
         });
         return;
     }
@@ -467,8 +503,9 @@ app.get('/api/v2/policies/sync', authenticate, (req, res) => {
 
 app.post('/api/v2/policies/update', authenticate, (req, res) => {
     const { group, policy, host, newGroup } = req.body;
-    if (typeof host === 'string' && host.length > MAX_HOST_NAME) {
-        return res.status(400).json({ error: 'Bad request' });
+    if (typeof host === 'string' && host !== '') {
+        const parsedHost = parseHost(host);
+        if (parsedHost.error) return res.status(parsedHost.status).json({ error: parsedHost.error });
     }
 
     // Allowlist adapter (CALL A). WATCHTOWER_ALLOWLIST=0 does not skip this.

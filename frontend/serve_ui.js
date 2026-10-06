@@ -50,6 +50,7 @@ function sessionCookie(token) {
 
 function readCookieHeader(header) {
     const cookies = {};
+    const sessions = [];
     let malformed = false;
     String(header || '').split(';').forEach((part) => {
         const i = part.indexOf('=');
@@ -57,12 +58,21 @@ function readCookieHeader(header) {
         const name = part.slice(0, i).trim();
         const value = part.slice(i + 1).trim();
         if (!name) return;
+        if (name === 'wt_session') {
+            try {
+                sessions.push(decodeURIComponent(value));
+            } catch (_) {
+                malformed = true;
+            }
+            return;
+        }
         try {
             cookies[name] = decodeURIComponent(value);
-        } catch (_) {
-            if (name === 'wt_session') malformed = true;
-        }
+        } catch (_) {}
     });
+    if (!malformed && sessions.length && sessions.every((value) => value === sessions[0])) {
+        cookies.wt_session = sessions[0];
+    }
     return { cookies, malformed };
 }
 
@@ -162,9 +172,14 @@ function pruneLoginFailures(now) {
     for (const [ip, row] of [...loginFailures]) {
         if (row.until > 0 && row.until <= now) loginFailures.delete(ip);
     }
-    while (loginFailures.size > LOGIN_FAILURE_CAP) {
-        const oldest = loginFailures.keys().next().value;
-        loginFailures.delete(oldest);
+    if (loginFailures.size <= LOGIN_FAILURE_CAP) return;
+    const inactive = [];
+    for (const [ip, row] of loginFailures) {
+        if (!(row.until > now)) inactive.push(ip);
+    }
+    for (const ip of inactive) {
+        if (loginFailures.size <= LOGIN_FAILURE_CAP) return;
+        loginFailures.delete(ip);
     }
 }
 
@@ -252,8 +267,7 @@ app.get('/login', sendLogin);
 
 app.get('/', (req, res) => {
     const parsed = cookiesOf(req);
-    if (parsed.malformed) return generic(res, 400);
-    if (!sessionValid(parsed.cookies)) return res.redirect('/login');
+    if (parsed.malformed || !sessionValid(parsed.cookies)) return res.redirect('/login');
     res.redirect('/watchtower.html');
 });
 
@@ -312,13 +326,47 @@ app.get('/assets/watchtower_logo.png', (req, res) => {
     res.sendFile(LOGO_PATH);
 });
 
-function agentOnlyPath(urlPath) {
-    const pathOnly = String(urlPath || '').split('?')[0];
-    return pathOnly === '/api/v2/c2/beacon' || pathOnly === '/api/v2/policies/sync';
+const BROWSER_V2 = new Set([
+    '/api/v2/infrastructure',
+    '/api/v2/topology',
+    '/api/v2/ota/upload',
+    '/api/v2/policies/update',
+]);
+
+function normalizeProxyPath(urlPath) {
+    const raw = String(urlPath || '');
+    const q = raw.indexOf('?');
+    let pathname = q === -1 ? raw : raw.slice(0, q);
+    const query = q === -1 ? '' : raw.slice(q);
+    if (pathname.includes('\\') || pathname.includes('\0')) return null;
+    let decoded;
+    try {
+        decoded = decodeURIComponent(pathname);
+    } catch (_) {
+        return null;
+    }
+    if (decoded.includes('%') || decoded.includes('\0') || decoded.includes('\\')) return null;
+    const parts = [];
+    decoded.toLowerCase().split('/').forEach((segment) => {
+        if (segment === '' || segment === '.') return;
+        if (segment === '..') {
+            parts.pop();
+            return;
+        }
+        parts.push(segment);
+    });
+    return { path: '/' + parts.join('/'), query };
+}
+
+function proxyPathAllowed(pathname) {
+    if (pathname === '/socket.io' || pathname.startsWith('/socket.io/')) return true;
+    if (pathname === '/api/v2' || pathname.startsWith('/api/v2/')) return BROWSER_V2.has(pathname);
+    return pathname.startsWith('/api/');
 }
 
 function proxyToApi(req, res) {
-    if (agentOnlyPath(req.originalUrl || req.url)) return generic(res, 403);
+    const normalized = normalizeProxyPath(req.originalUrl || req.url);
+    if (!normalized || !proxyPathAllowed(normalized.path)) return generic(res, 403);
     const method = String(req.method || 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && !originAllowed(req)) {
         return generic(res, 403);
@@ -330,7 +378,7 @@ function proxyToApi(req, res) {
     const preq = http.request({
         hostname: apiHost,
         port: Number(apiPort),
-        path: req.originalUrl || req.url,
+        path: normalized.path + normalized.query,
         method: req.method,
         headers,
     }, (pres) => {

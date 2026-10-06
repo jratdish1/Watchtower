@@ -88,7 +88,7 @@ function operatorKeyProblem(raw) {
   if (raw === undefined || raw === null) return 'unset';
   const key = String(raw);
   if (key.length === 0 || key.trim() === '') return 'empty';
-  if (placeholderKeySet().has(key)) return 'placeholder';
+  if (placeholderKeySet().has(key.trim())) return 'placeholder';
   if (key.length < MIN_OPERATOR_KEY_LENGTH) return 'too_short';
   return null;
 }

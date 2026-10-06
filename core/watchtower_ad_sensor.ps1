@@ -9,7 +9,8 @@ Includes an outbound beacon for Command & Control (C2) to execute response actio
 $HubIP = "100.x.x.x" # Replace with Master Hub Tailscale/Mesh IP
 $HubApiPort = 3000
 $ApiKey = $env:WATCHTOWER_API_KEY
-if ([string]::IsNullOrWhiteSpace($ApiKey) -or $ApiKey -in @('WATCHTOWER_DEFAULT_KEY', 'YOUR_SECRET_API_KEY_HERE', 'generate_a_secure_random_key_here') -or $ApiKey.Length -lt 32) {
+$ApiKeyTrimmed = if ($null -eq $ApiKey) { '' } else { $ApiKey.Trim() }
+if ([string]::IsNullOrWhiteSpace($ApiKey) -or $ApiKeyTrimmed -in @('WATCHTOWER_DEFAULT_KEY', 'YOUR_SECRET_API_KEY_HERE', 'generate_a_secure_random_key_here') -or $ApiKeyTrimmed.Length -lt 32) {
     Write-Error "[Watchtower] Refusing to start: WATCHTOWER_API_KEY is unset, empty, a public placeholder, or shorter than 32 characters."
     exit 1
 }

@@ -18,6 +18,17 @@ POLICY_FILE = os.environ.get("WATCHTOWER_DATA_DIR", "../data") + "/policy.json"
 
 RUNNING_SENSORS = {}
 
+def ota_signature_ok(payload_bytes, hmac_sig):
+    """True only when hmac_sig is the SHA-256 HMAC of payload_bytes under the operator key."""
+    import hmac
+    import hashlib
+    if not isinstance(hmac_sig, str) or hmac_sig == "":
+        return False
+    expected = hmac.new(API_KEY.encode(), payload_bytes, hashlib.sha256).hexdigest()
+    if len(hmac_sig) != len(expected):
+        return False
+    return hmac.compare_digest(hmac_sig, expected)
+
 def sync_policy():
     url = f"{API_URL}/api/v2/policies/sync?host={HOSTNAME}"
     try:
@@ -119,26 +130,24 @@ def execute_local_quarantine(action, target, hmac_sig=None):
 
     if action == "UPDATE_CORE":
         print(f"[*] Executing OTA Agent Update from {target}...")
+        if not isinstance(hmac_sig, str) or hmac_sig == "":
+            print("[!] FATAL: OTA signature missing")
+            return
         try:
             import urllib.request
             import zipfile
-            import hmac
-            import hashlib
-            
+
             payload_path = "/tmp/watchtower_update.zip"
             urllib.request.urlretrieve(target, payload_path)
-            
-            # V4 Crypto Verify
+
             with open(payload_path, 'rb') as f:
                 payload_bytes = f.read()
-            expected_hmac = hmac.new(API_KEY.encode(), payload_bytes, hashlib.sha256).hexdigest()
-            
-            if hmac_sig and not hmac.compare_digest(hmac_sig, expected_hmac):
-                print(f"[!] FATAL: OTA Signature Mismatch! Expected {expected_hmac[:12]}, Got {hmac_sig[:12]}")
+            if not ota_signature_ok(payload_bytes, hmac_sig):
+                print("[!] FATAL: OTA signature invalid")
                 os.remove(payload_path)
                 return
-                
-            print(f"[+] OTA Payload HMAC Verified: {expected_hmac[:12]}...")
+
+            print("[+] OTA payload signature verified")
             
             with zipfile.ZipFile(payload_path, 'r') as zip_ref:
                 zip_ref.extractall(os.path.dirname(os.path.abspath(__file__)))

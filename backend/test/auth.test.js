@@ -52,6 +52,15 @@ function auth(key) {
   check('short key is rejected', operatorKeyProblem('a'.repeat(MIN_OPERATOR_KEY_LENGTH - 1)) === 'too_short');
   check('32 character private key is accepted', operatorKeyProblem('b'.repeat(MIN_OPERATOR_KEY_LENGTH)) === null);
   check('template example key is rejected', operatorKeyProblem('generate_a_secure_random_key_here') === 'placeholder');
+  check(
+    'placeholder padded with whitespace is rejected',
+    operatorKeyProblem('  generate_a_secure_random_key_here  ') === 'placeholder'
+      && operatorKeyProblem('WATCHTOWER_DEFAULT_KEY' + ' '.repeat(16)) === 'placeholder'
+  );
+  check(
+    'a non-placeholder key keeps surrounding whitespace',
+    operatorKeyProblem('  ' + 'c'.repeat(32)) === null
+  );
   const exampleSrc = fs.readFileSync(path.join(__dirname, '../../.env.example'), 'utf8');
   const exampleUrl = (exampleSrc.match(/^AI_INFERENCE_URL=(.*)$/m) || [])[1];
   check(
@@ -462,6 +471,17 @@ function auth(key) {
       maxJoin.status === 200 && enrollDb().deviceGroups && enrollDb().deviceGroups[maxHost] === 'Default',
       String(maxJoin.status)
     );
+    for (const reserved of ['__proto__', 'constructor', 'toString']) {
+      const blocked = await request(enrollApi.port, 'POST', '/api/v2/c2/beacon?host=' + reserved, Object.assign({
+        'Content-Type': 'application/json',
+      }, auth(KEY)), '{}');
+      const groups = enrollDb().deviceGroups || {};
+      check(
+        'POST beacon rejects reserved host ' + reserved,
+        blocked.status === 400 && !Object.prototype.hasOwnProperty.call(groups, reserved),
+        String(blocked.status) + ' ' + blocked.body
+      );
+    }
   } finally {
     enrollApi.stop();
   }
@@ -639,6 +659,7 @@ function auth(key) {
   await expectRefuse('empty key', { WATCHTOWER_API_KEY: '' }, []);
   await expectRefuse('placeholder key', { WATCHTOWER_API_KEY: 'WATCHTOWER_DEFAULT_KEY' }, ['WATCHTOWER_DEFAULT_KEY']);
   await expectRefuse('template example key', { WATCHTOWER_API_KEY: 'generate_a_secure_random_key_here' }, ['generate_a_secure_random_key_here']);
+  await expectRefuse('padded placeholder key', { WATCHTOWER_API_KEY: '  generate_a_secure_random_key_here  ' }, ['generate_a_secure_random_key_here']);
   await expectRefuse('short key', { WATCHTOWER_API_KEY: 'short-key-value' }, ['short-key-value']);
 
   const coreDir = path.join(__dirname, '../../core');
@@ -666,6 +687,70 @@ function auth(key) {
   const beaconLog = (beacon.stderr || '') + (beacon.stdout || '');
   check('beacon without a key exits 1', beacon.status === 1, String(beacon.status) + ' ' + beaconLog);
   check('beacon refusal does not print a key', beaconLog.includes('Refusing to start') && !beaconLog.includes('WATCHTOWER_DEFAULT_KEY'));
+  const paddedPy = spawnSync('python3', ['-c', 'from operator_key import require_operator_key\nrequire_operator_key()'], {
+    cwd: coreDir,
+    env: Object.assign({}, process.env, { WATCHTOWER_API_KEY: '  generate_a_secure_random_key_here  ' }),
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  const paddedPyLog = (paddedPy.stderr || '') + (paddedPy.stdout || '');
+  check(
+    'python client rejects a padded placeholder',
+    paddedPy.status === 1 && paddedPyLog.includes('Refusing to start') && !paddedPyLog.includes('generate_a_secure_random_key_here'),
+    String(paddedPy.status) + ' ' + paddedPyLog
+  );
+  const otaZip = path.join(os.tmpdir(), 'wt-ota-probe-' + process.pid + '.zip');
+  const otaProbe = spawnSync('python3', ['-c', [
+    'import os, hmac, hashlib, zipfile, pathlib, sys',
+    'sys.path.insert(0, os.environ["WT_CORE"])',
+    'import watchtower_beacon as beacon',
+    'marker = "wt-ota-must-not-land.txt"',
+    'zip_path = os.environ["WT_ZIP"]',
+    'with zipfile.ZipFile(zip_path, "w") as zf:',
+    '    zf.writestr(marker, b"no")',
+    'url = pathlib.Path(zip_path).as_uri()',
+    'landed = os.path.join(os.environ["WT_CORE"], marker)',
+    'beacon.execute_local_quarantine("UPDATE_CORE", url, None)',
+    'missing = os.path.exists(landed)',
+    'beacon.execute_local_quarantine("UPDATE_CORE", url, "00")',
+    'short = os.path.exists(landed)',
+    'beacon.execute_local_quarantine("UPDATE_CORE", url, "0" * 64)',
+    'bad = os.path.exists(landed)',
+    'good = hmac.new(os.environ["WATCHTOWER_API_KEY"].encode(), b"abc", hashlib.sha256).hexdigest()',
+    'print("MISSING", int(missing))',
+    'print("SHORT", int(short))',
+    'print("BAD", int(bad))',
+    'print("NONE", int(beacon.ota_signature_ok(b"abc", None)))',
+    'print("EMPTY", int(beacon.ota_signature_ok(b"abc", "")))',
+    'print("GOOD", int(beacon.ota_signature_ok(b"abc", good)))',
+    'print("WRONG", int(beacon.ota_signature_ok(b"abc", "f" * 64)))',
+  ].join('\n')], {
+    cwd: coreDir,
+    env: Object.assign({}, process.env, {
+      WATCHTOWER_API_KEY: KEY,
+      WT_CORE: coreDir,
+      WT_ZIP: otaZip,
+    }),
+    encoding: 'utf8',
+    timeout: 8000,
+  });
+  const otaOut = (otaProbe.stdout || '') + (otaProbe.stderr || '');
+  check(
+    'OTA apply requires a valid signature',
+    otaProbe.status === 0
+      && otaOut.includes('MISSING 0')
+      && otaOut.includes('SHORT 0')
+      && otaOut.includes('BAD 0')
+      && otaOut.includes('NONE 0')
+      && otaOut.includes('EMPTY 0')
+      && otaOut.includes('GOOD 1')
+      && otaOut.includes('WRONG 0')
+      && !otaOut.includes(KEY),
+    otaOut
+  );
+  try { fs.unlinkSync(otaZip); } catch (_) {}
+  try { fs.unlinkSync(path.join(coreDir, 'wt-ota-must-not-land.txt')); } catch (_) {}
+  check('ad sensor trims before the placeholder list', ps1.includes('$ApiKeyTrimmed') && ps1.includes('$ApiKeyTrimmed -in'));
   check('repo data files are unchanged', snapEqual(repoBefore, repoSnap()));
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
