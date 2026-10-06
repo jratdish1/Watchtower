@@ -14,9 +14,9 @@
 | base (`main` at branch point) | `383964e7851330ebe3d66ad1eb0fd0371f9b984f` |
 | prior tip (before operator-key close) | `8ca0cd8e99bae5d1d9335a02115701279ba00340` |
 | memory-search auth commit | `b2198712693630ced6674150aeb60b5819a39a6c` |
-| head (operator-key auth commit) | `HEAD_SHA_PLACEHOLDER` |
+| head (operator-key auth commit) | `9e25b7a1c6596a7ff12b101c032ada6bc882aa84` |
 
-`head` is `HEAD_SHA_PLACEHOLDER`, the commit that refuses a missing or placeholder operator key and removes that key from the Glass Pane HTML. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
+`head` is `9e25b7a1c6596a7ff12b101c032ada6bc882aa84`, the commit that refuses a missing or placeholder operator key and removes that key from the Glass Pane HTML. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
@@ -76,7 +76,7 @@ These paths were not required by any row and were not used:
 
 ## Independent review close (tip 8ca0cd8 NOT_GRADE_A)
 
-Each item below is fixed in `HEAD_SHA_PLACEHOLDER`. None are left as documentation-only.
+Each item below is fixed in `9e25b7a1c6596a7ff12b101c032ada6bc882aa84`. None are left as documentation-only.
 
 | Item | Status | What changed |
 |------|--------|----------------|
