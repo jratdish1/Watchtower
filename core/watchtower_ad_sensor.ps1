@@ -103,7 +103,7 @@ Function Send-Telemetry ($EventRecord) {
 Function Check-C2-Queue {
     # Outbound beaconing to check for commands (No inbound ports opened on the DC)
     try {
-        $Response = Invoke-RestMethod -Uri "$BeaconUrl?host=$Hostname" -Method Get -Headers @{"x-api-key"=$ApiKey} -TimeoutSec 5
+        $Response = Invoke-RestMethod -Uri "$BeaconUrl?host=$Hostname" -Method Post -Body '{}' -ContentType 'application/json' -Headers @{"x-api-key"=$ApiKey} -TimeoutSec 5
         if ($Response.commands) {
             foreach ($Cmd in $Response.commands) {
                 Write-Host "[!] C2 Command Received: $($Cmd.action) on $($Cmd.target)" -ForegroundColor Yellow

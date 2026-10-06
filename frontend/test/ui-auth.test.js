@@ -13,6 +13,7 @@ const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
 const { TEST_OPERATOR_KEY, startApi } = require('../../backend/test/spawn_api');
+const io = require(path.join(__dirname, '../node_modules/socket.io-client'));
 
 let passed = 0;
 let failed = 0;
@@ -217,12 +218,20 @@ function cookiePair(res) {
     const badCookie = await rawRequest(port, 'GET', '/watchtower.html', { Cookie: 'wt_session=%E0%A4%A' });
     check('malformed cookie is 400', badCookie.status === 400, String(badCookie.status) + ' ' + badCookie.body);
     check('malformed cookie body is generic', badCookie.json && badCookie.json.error === 'Bad request' && !leaks(badCookie.body), badCookie.body);
-    const badLogin = await rawRequest(port, 'GET', '/login', { Cookie: 'x=%' });
-    check('malformed cookie on /login is 400', badLogin.status === 400 && !leaks(badLogin.body), badLogin.body);
+    const badLogin = await rawRequest(port, 'GET', '/login', { Cookie: 'wt_session=%E0%A4%A' });
+    check('malformed session cookie on /login is 400', badLogin.status === 400 && !leaks(badLogin.body), badLogin.body);
+    const otherCookie = await rawRequest(port, 'GET', '/login', { Cookie: 'prefs=%E0%A4%A' });
+    check('unrelated malformed cookie still serves /login', otherCookie.status === 200, String(otherCookie.status) + ' ' + otherCookie.body);
+    const otherRoot = await rawRequest(port, 'GET', '/', { Cookie: 'theme=%' });
+    check(
+      'unrelated malformed cookie still redirects /',
+      otherRoot.status === 302 && otherRoot.headers.location === '/login',
+      String(otherRoot.status)
+    );
     const stillUp = await rawRequest(port, 'GET', '/login');
     check('UI still serves /login after a malformed cookie', stillUp.status === 200, String(stillUp.status));
     const badJson = await rawRequest(port, 'POST', '/login', { 'Content-Type': 'application/json' }, '{');
-    check('invalid JSON does not return a stack', (badJson.status === 400 || badJson.status === 500) && !leaks(badJson.body), badJson.status + ' ' + badJson.body);
+    check('invalid JSON is 400 without a stack', badJson.status === 400 && badJson.json && badJson.json.error === 'Bad request' && !leaks(badJson.body), badJson.status + ' ' + badJson.body);
 
     const wsBad = await new Promise((resolve) => {
       const sock = net.connect(port, '127.0.0.1', () => {
@@ -285,7 +294,6 @@ function cookiePair(res) {
     check('proxied alerts with a session and no browser key → 200', alerts.status === 200 && Array.isArray(alerts.json), JSON.stringify(alerts.json));
     check('proxied body does not echo the key', !alerts.body.includes(TEST_OPERATOR_KEY));
 
-    const io = require(path.join(__dirname, '../node_modules/socket.io-client'));
     const denied = await new Promise((resolve) => {
       const socket = io('http://127.0.0.1:' + uiPort, {
         transports: ['websocket'],
@@ -305,7 +313,7 @@ function cookiePair(res) {
         reconnection: false,
         timeout: 3000,
         forceNew: true,
-        extraHeaders: { Cookie: cookie },
+        extraHeaders: { Cookie: cookie, Origin: 'http://127.0.0.1:' + uiPort },
       });
       const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, 3500);
       socket.on('connect', () => { clearTimeout(timer); socket.close(); resolve('connected'); });
@@ -324,6 +332,60 @@ function cookiePair(res) {
       Origin: 'http://127.0.0.1:' + uiPort,
     }, JSON.stringify({ ip: '203.0.113.10', name: 'fixture' }));
     check('proxied POST with a matching Origin succeeds', withOrigin.status === 200, withOrigin.status + ' ' + withOrigin.body);
+
+    const crossOrigin = await new Promise((resolve) => {
+      const sock = net.connect(uiPort, '127.0.0.1', () => {
+        sock.write(
+          'GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\n'
+          + 'Host: 127.0.0.1:' + uiPort + '\r\n'
+          + 'Upgrade: websocket\r\n'
+          + 'Connection: Upgrade\r\n'
+          + 'Origin: https://evil.example\r\n'
+          + 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+          + 'Sec-WebSocket-Version: 13\r\n'
+          + 'Cookie: ' + cookie + '\r\n'
+          + '\r\n'
+        );
+      });
+      let data = '';
+      const timer = setTimeout(() => { sock.destroy(); resolve(data); }, 2000);
+      sock.on('data', (chunk) => { data += chunk.toString('utf8'); });
+      sock.on('error', () => {});
+      sock.on('close', () => { clearTimeout(timer); resolve(data); });
+    });
+    check(
+      'cross-origin WebSocket upgrade is refused before 101',
+      crossOrigin.includes('403') && !crossOrigin.includes('101'),
+      crossOrigin
+    );
+
+    const live = await new Promise((resolve) => {
+      const socket = io('http://127.0.0.1:' + uiPort, {
+        transports: ['websocket'],
+        reconnection: false,
+        timeout: 3000,
+        forceNew: true,
+        extraHeaders: { Cookie: cookie, Origin: 'http://127.0.0.1:' + uiPort },
+      });
+      const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, 3500);
+      socket.on('connect', () => { clearTimeout(timer); resolve(socket); });
+      socket.on('connect_error', (err) => { clearTimeout(timer); socket.close(); resolve('error:' + (err && err.message)); });
+    });
+    check('socket stays up before logout', live && live.connected === true, String(live));
+    if (live && live.connected) {
+      const gone = new Promise((resolve) => {
+        const timer = setTimeout(() => resolve('timeout'), 2000);
+        live.on('disconnect', () => { clearTimeout(timer); resolve('disconnected'); });
+      });
+      const loggedOut = await rawRequest(uiPort, 'POST', '/logout', { Cookie: cookie });
+      const closed = await gone;
+      check('logout returns ok', loggedOut.status === 200, String(loggedOut.status));
+      check('logout closes the open WebSocket', closed === 'disconnected', closed);
+      live.close();
+    } else {
+      check('logout returns ok', false, 'socket was not connected');
+      check('logout closes the open WebSocket', false, 'socket was not connected');
+    }
   } finally {
     proxied.child.kill('SIGTERM');
     api.stop();
@@ -339,6 +401,11 @@ function cookiePair(res) {
     }
     const blocked = await rawRequest(throttlePort, 'POST', '/login', { 'Content-Type': 'application/json' }, JSON.stringify({ key: 'z'.repeat(32) }));
     check('sixth login failure is throttled', blocked.status === 429 && blocked.json && blocked.json.error === 'Too many requests', blocked.body);
+    const spoofed = await rawRequest(throttlePort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.50',
+    }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    check('untrusted X-Forwarded-For does not bypass the socket throttle', spoofed.status === 429, spoofed.body);
   } finally {
     throttled.child.kill('SIGTERM');
   }
@@ -354,6 +421,68 @@ function cookiePair(res) {
     check('expired session is rejected', expired.status === 401, String(expired.status));
   } finally {
     shortLived.child.kill('SIGTERM');
+  }
+
+  const trustPort = await freePort();
+  const trusted = spawnUi(trustPort, { WATCHTOWER_TRUSTED_PROXY: '127.0.0.1' });
+  try {
+    await trusted.ready;
+    for (let i = 0; i < 5; i++) {
+      const miss = await rawRequest(trustPort, 'POST', '/login', {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '203.0.113.8',
+      }, JSON.stringify({ key: 'z'.repeat(32) }));
+      check('trusted-proxy failure ' + (i + 1) + ' is 401', miss.status === 401, String(miss.status));
+    }
+    const locked = await rawRequest(trustPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.8',
+    }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    check('forwarded client stays throttled', locked.status === 429, locked.body);
+    const other = await rawRequest(trustPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.9',
+    }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    check('a different forwarded client can still log in', other.status === 200, other.body);
+  } finally {
+    trusted.child.kill('SIGTERM');
+  }
+
+  const shortWsPort = await freePort();
+  const shortApi = await startApi({ WATCHTOWER_API_KEY: TEST_OPERATOR_KEY });
+  const shortWs = spawnUi(shortWsPort, {
+    WATCHTOWER_UI_SESSION_MS: '400',
+    WATCHTOWER_API_PORT: String(shortApi.port),
+    WATCHTOWER_API_KEY: TEST_OPERATOR_KEY,
+  });
+  try {
+    await shortWs.ready;
+    const session = await rawRequest(shortWsPort, 'POST', '/login', { 'Content-Type': 'application/json' }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    const shortCookie = cookiePair(session).split(';')[0];
+    const closed = await new Promise((resolve) => {
+      const socket = io('http://127.0.0.1:' + shortWsPort, {
+        transports: ['websocket'],
+        reconnection: false,
+        timeout: 3000,
+        forceNew: true,
+        extraHeaders: { Cookie: shortCookie, Origin: 'http://127.0.0.1:' + shortWsPort },
+      });
+      const timer = setTimeout(() => { socket.close(); resolve('timeout'); }, 3000);
+      socket.on('connect', () => {
+        setTimeout(() => {
+          if (!socket.connected) {
+            clearTimeout(timer);
+            resolve('disconnected');
+          }
+        }, 700);
+      });
+      socket.on('disconnect', () => { clearTimeout(timer); resolve('disconnected'); });
+      socket.on('connect_error', (err) => { clearTimeout(timer); socket.close(); resolve('error:' + (err && err.message)); });
+    });
+    check('expired session closes the open WebSocket', closed === 'disconnected', closed);
+  } finally {
+    shortWs.child.kill('SIGTERM');
+    shortApi.stop();
   }
 
   const securePort = await freePort();

@@ -75,7 +75,11 @@ def manage_sensors(policy):
 def check_beacon():
     url = f"{API_URL}/api/v2/c2/beacon?host={HOSTNAME}"
     try:
-        req = urllib.request.Request(url, headers={'x-api-key': API_KEY})
+        req = urllib.request.Request(
+            url,
+            data=b'{}',
+            headers={'x-api-key': API_KEY, 'Content-Type': 'application/json'},
+        )
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode())
             commands = data.get("commands", [])

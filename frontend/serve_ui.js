@@ -14,6 +14,8 @@ const apiPort = process.env.WATCHTOWER_API_PORT || '3000';
 const apiHost = process.env.WATCHTOWER_API_HOST || '127.0.0.1';
 
 const sessions = new Map();
+const sessionSockets = new Map();
+const sessionTimers = new Map();
 const SESSION_MS = Number(process.env.WATCHTOWER_UI_SESSION_MS) > 0
     ? Number(process.env.WATCHTOWER_UI_SESSION_MS)
     : 8 * 60 * 60 * 1000;
@@ -54,7 +56,7 @@ function readCookieHeader(header) {
         try {
             cookies[name] = decodeURIComponent(value);
         } catch (_) {
-            malformed = true;
+            if (name === 'wt_session') malformed = true;
         }
     });
     return { cookies, malformed };
@@ -65,29 +67,90 @@ function cookiesOf(req) {
     return req._cookieParse;
 }
 
+function closeSessionSockets(token) {
+    const sockets = sessionSockets.get(token);
+    if (!sockets) return;
+    sessionSockets.delete(token);
+    for (const sock of sockets) {
+        try { sock.destroy(); } catch (_) {}
+    }
+}
+
+function destroySession(token) {
+    sessions.delete(token);
+    const timer = sessionTimers.get(token);
+    if (timer) {
+        clearTimeout(timer);
+        sessionTimers.delete(token);
+    }
+    closeSessionSockets(token);
+}
+
+function armSession(token) {
+    const exp = sessions.get(token);
+    const prev = sessionTimers.get(token);
+    if (prev) clearTimeout(prev);
+    const delay = Math.max(0, exp - Date.now());
+    const timer = setTimeout(() => {
+        if (sessions.has(token) && sessions.get(token) <= Date.now()) destroySession(token);
+    }, delay);
+    if (timer.unref) timer.unref();
+    sessionTimers.set(token, timer);
+}
+
+function trackSessionSocket(token, socket) {
+    let set = sessionSockets.get(token);
+    if (!set) {
+        set = new Set();
+        sessionSockets.set(token, set);
+    }
+    set.add(socket);
+    socket.on('close', () => {
+        const current = sessionSockets.get(token);
+        if (!current) return;
+        current.delete(socket);
+        if (current.size === 0) sessionSockets.delete(token);
+    });
+}
+
 function reapSessions() {
     const now = Date.now();
-    for (const [token, exp] of sessions) {
-        if (exp < now) sessions.delete(token);
+    for (const [token, exp] of [...sessions]) {
+        if (exp <= now) destroySession(token);
     }
     while (sessions.size > MAX_SESSIONS) {
         const oldest = sessions.keys().next().value;
-        sessions.delete(oldest);
+        destroySession(oldest);
     }
 }
 
 function sessionValid(cookies) {
     const token = cookies && cookies.wt_session;
     if (!token || !sessions.has(token)) return false;
-    if (sessions.get(token) < Date.now()) {
-        sessions.delete(token);
+    if (sessions.get(token) <= Date.now()) {
+        destroySession(token);
         return false;
     }
     return true;
 }
 
+function normalizeIp(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw.startsWith('::ffff:')) return raw.slice('::ffff:'.length);
+    return raw;
+}
+
 function clientIp(req) {
-    return req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : 'unknown';
+    const socketIp = normalizeIp(req.socket && req.socket.remoteAddress);
+    const trusted = normalizeIp(process.env.WATCHTOWER_TRUSTED_PROXY || '');
+    if (trusted && socketIp === trusted) {
+        const forwarded = req.headers['x-forwarded-for'];
+        if (forwarded) {
+            const first = String(forwarded).split(',')[0].trim();
+            if (first) return normalizeIp(first);
+        }
+    }
+    return socketIp || 'unknown';
 }
 
 function loginThrottled(ip) {
@@ -191,6 +254,7 @@ app.post('/login', express.json({ limit: '8kb' }), (req, res) => {
     reapSessions();
     const token = crypto.randomBytes(32).toString('hex');
     sessions.set(token, Date.now() + SESSION_MS);
+    armSession(token);
     reapSessions();
     res.setHeader('Set-Cookie', sessionCookie(token));
     res.setHeader('Cache-Control', 'no-store');
@@ -201,7 +265,7 @@ app.post('/logout', (req, res) => {
     const parsed = cookiesOf(req);
     if (parsed.malformed) return generic(res, 400);
     const token = parsed.cookies.wt_session;
-    if (token) sessions.delete(token);
+    if (token) destroySession(token);
     res.setHeader('Set-Cookie', sessionCookie(''));
     res.json({ ok: true });
 });
@@ -287,6 +351,12 @@ server.on('upgrade', (req, socket, head) => {
             socket.destroy();
             return;
         }
+        if (!originAllowed(req)) {
+            socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+            socket.destroy();
+            return;
+        }
+        trackSessionSocket(parsed.cookies.wt_session, socket);
         const headers = Object.assign({}, req.headers);
         headers['x-api-key'] = apiKey;
         delete headers.cookie;

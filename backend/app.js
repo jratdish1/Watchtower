@@ -29,11 +29,34 @@ const io = new Server(server, {
 
 const port = process.env.WATCHTOWER_API_PORT || 3000;
 
+/**
+ * Relative paths are resolved from the repository root (parent of backend/),
+ * not from process.cwd(). start.sh launches this file from backend/, and
+ * .env.example sets WATCHTOWER_DATA_DIR=./data.
+ */
+function resolveFromRepo(value, fallbackAbs) {
+    if (value === undefined || value === null || String(value).trim() === '') return fallbackAbs;
+    const raw = String(value).trim();
+    if (path.isAbsolute(raw)) return path.resolve(raw);
+    return path.resolve(__dirname, '..', raw);
+}
+
 // ------------------------------------------------------------------
 // CONFIGURATION
 // ------------------------------------------------------------------
 const BIND_ADDRESS = process.env.WATCHTOWER_BIND_ADDRESS || '0.0.0.0';
 const API_KEY = requireOperatorKey(process.env.WATCHTOWER_API_KEY);
+const DATA_DIR = resolveFromRepo(process.env.WATCHTOWER_DATA_DIR, path.join(__dirname, '..', 'data'));
+function dataFile(name) {
+    return path.join(DATA_DIR, name);
+}
+const UPDATES_DIR = resolveFromRepo(process.env.WATCHTOWER_UPDATES_DIR, path.join(__dirname, 'updates'));
+const PUBLIC_BASE_URL = process.env.WATCHTOWER_PUBLIC_BASE_URL && String(process.env.WATCHTOWER_PUBLIC_BASE_URL).trim()
+    ? String(process.env.WATCHTOWER_PUBLIC_BASE_URL).trim().replace(/\/$/, '')
+    : '';
+if (!PUBLIC_BASE_URL) {
+    console.warn('[OTA] WATCHTOWER_PUBLIC_BASE_URL is unset. OTA upload is refused so a beacon is not sent a loopback URL.');
+}
 let c2Queue = {};
 
 console.log('[Watchtower Command Center] Operator API key loaded from environment');
@@ -54,7 +77,7 @@ app.use((req, res, next) => {
         res.status(403).send("403 Forbidden: Access restricted to Tailscale/Local network.");
     }
 });
-app.use('/updates', express.static(path.join(__dirname, 'updates')));
+app.use('/updates', express.static(UPDATES_DIR));
 app.use('/assets', express.static(path.join(__dirname, '../assets')));
 
 // ------------------------------------------------------------------
@@ -77,13 +100,8 @@ function queueHostCommand(host, action, target) {
     return null;
 }
 
-const DATA_DIR = process.env.WATCHTOWER_DATA_DIR
-    ? path.resolve(process.env.WATCHTOWER_DATA_DIR)
-    : path.join(__dirname, '../data');
-function dataFile(name) {
-    return path.join(DATA_DIR, name);
-}
-const DB_FILE = process.env.WATCHTOWER_DB_PATH || dataFile('watchtower_db.json');
+const DB_FILE = resolveFromRepo(process.env.WATCHTOWER_DB_PATH, dataFile('watchtower_db.json'));
+console.log('[Watchtower DB] Data directory ' + DATA_DIR);
 if (!fs.existsSync(path.dirname(DB_FILE))) {
     fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
 }
@@ -392,17 +410,23 @@ app.post('/api/v2/ingest/inventory', authenticate, (req, res) => {
 app.get('/api/v2/c2/beacon', authenticate, (req, res) => {
     const host = req.query.host;
     if (!host) return res.status(400).json({ error: 'Host parameter required' });
-    
-    // Auto-enroll unseen beacons into Default Map
-    if(!deviceGroupMap[host]) {
-        deviceGroupMap[host] = "Default";
+    // Read-only. A cross-origin GET must not enroll a host or empty the queue.
+    const commands = c2Queue[host] ? c2Queue[host].slice() : [];
+    res.json({ status: 'ok', commands });
+});
+
+app.post('/api/v2/c2/beacon', authenticate, (req, res) => {
+    const host = (req.body && req.body.host) || req.query.host;
+    if (!host || typeof host !== 'string') return res.status(400).json({ error: 'Host parameter required' });
+
+    if (!deviceGroupMap[host]) {
+        deviceGroupMap[host] = 'Default';
         saveDB();
         io.emit('policy_sync', { groups: groupDB, deviceGroups: deviceGroupMap });
     }
-    
+
     const commands = c2Queue[host] || [];
-    c2Queue[host] = []; // clear after fetching
-    
+    c2Queue[host] = [];
     res.json({ status: 'ok', commands });
 });
 
@@ -466,11 +490,13 @@ app.post('/api/v2/ota/upload', authenticate, (req, res) => {
     const deny = allowlist.assertOtaGroup(groupName);
     if (allowlist.sendHttpDeny(res, deny)) return;
 
-    const otaDir = __dirname + '/updates';
-    if (!fs.existsSync(otaDir)) fs.mkdirSync(otaDir, { recursive: true });
-    
-    // We expect the payload to be the raw buffer of the zip file handled by express.raw
-    const zipPath = otaDir + '/update_core.zip';
+    if (!PUBLIC_BASE_URL) {
+        console.error('[OTA] Refusing upload: WATCHTOWER_PUBLIC_BASE_URL is unset.');
+        return res.status(503).json({ error: 'OTA unavailable' });
+    }
+
+    if (!fs.existsSync(UPDATES_DIR)) fs.mkdirSync(UPDATES_DIR, { recursive: true });
+    const zipPath = path.join(UPDATES_DIR, 'update_core.zip');
     
     try {
         fs.writeFileSync(zipPath, req.body);
@@ -480,11 +506,7 @@ app.post('/api/v2/ota/upload', authenticate, (req, res) => {
         const fileHmac = crypto.createHmac('sha256', API_KEY).update(req.body).digest('hex');
         
         let hostsUpdated = 0;
-        const configuredBase = process.env.WATCHTOWER_PUBLIC_BASE_URL;
-        const baseUrl = (configuredBase && String(configuredBase).trim())
-            ? String(configuredBase).trim().replace(/\/$/, '')
-            : ('http://127.0.0.1:' + port);
-        const targetUrl = baseUrl + '/updates/update_core.zip';
+        const targetUrl = PUBLIC_BASE_URL + '/updates/update_core.zip';
         
         Object.keys(deviceGroupMap).forEach(h => {
              if (deviceGroupMap[h] === groupName || groupName === "ALL") {
@@ -587,9 +609,16 @@ app.get('/api/memory/search', authenticate, (req, res) => {
 // START
 // ------------------------------------------------------------------
 app.use((err, req, res, next) => {
-    console.error('[API] ' + (err && err.message ? err.message : 'handler error'));
+    const status = Number(err && (err.status || err.statusCode));
+    const code = status >= 400 && status < 500 ? status : 500;
+    console.error('[API] ' + (code === 400 ? 'bad request' : 'handler error'));
     if (res.headersSent) return;
-    res.status(500).json({ error: 'Request failed' });
+    const error = code === 400 ? 'Bad request'
+        : code === 401 ? 'Unauthorized'
+        : code === 403 ? 'Forbidden'
+        : code === 404 ? 'Not found'
+        : 'Request failed';
+    res.status(code).json({ error });
 });
 
 server.on('error', (e) => {

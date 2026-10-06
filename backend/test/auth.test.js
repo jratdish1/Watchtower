@@ -13,7 +13,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { keysEqual, operatorKeyProblem, MIN_OPERATOR_KEY_LENGTH } = require('../auth');
 const { ipAllowed } = require('../ip_allow');
-const { request, startApi, TEST_OPERATOR_KEY } = require('./spawn_api');
+const { request, startApi, freePort, TEST_OPERATOR_KEY } = require('./spawn_api');
 
 const KEY = TEST_OPERATOR_KEY;
 let passed = 0;
@@ -209,6 +209,12 @@ function auth(key) {
 
     const purgeNoKey = await request(api.port, 'DELETE', '/api/v2/infrastructure');
     check('DELETE infrastructure missing key → 401', purgeNoKey.status === 401, String(purgeNoKey.status));
+
+    const badJson = await request(api.port, 'POST', '/api/v2/ingest/threat', Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), '{');
+    check('malformed JSON is 400', badJson.status === 400 && badJson.json && badJson.json.error === 'Bad request', badJson.status + ' ' + badJson.body);
+    check('malformed JSON body has no stack', !/at\s+\S+\.js:\d+/.test(badJson.body) && !badJson.body.includes('SyntaxError'));
   } finally {
     if (api) api.stop();
   }
@@ -359,6 +365,26 @@ function auth(key) {
       beacon.status === 200 && beacon.json && beacon.json.commands && beacon.json.commands.some((c) => c.action === 'quarantine'),
       JSON.stringify(beacon.json)
     );
+    const beaconAgain = await request(autoOn.port, 'GET', '/api/v2/c2/beacon?host=ops-1', auth(KEY));
+    check(
+      'GET beacon does not empty the queue',
+      beaconAgain.status === 200 && beaconAgain.json && beaconAgain.json.commands && beaconAgain.json.commands.some((c) => c.action === 'quarantine'),
+      JSON.stringify(beaconAgain.json)
+    );
+    const pulled = await request(autoOn.port, 'POST', '/api/v2/c2/beacon?host=ops-1', Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), '{}');
+    check(
+      'POST beacon returns the queued command',
+      pulled.status === 200 && pulled.json && pulled.json.commands && pulled.json.commands.some((c) => c.action === 'quarantine'),
+      JSON.stringify(pulled.json)
+    );
+    const afterPull = await request(autoOn.port, 'GET', '/api/v2/c2/beacon?host=ops-1', auth(KEY));
+    check(
+      'POST beacon clears the queue',
+      afterPull.status === 200 && afterPull.json && Array.isArray(afterPull.json.commands) && afterPull.json.commands.length === 0,
+      JSON.stringify(afterPull.json)
+    );
   } finally {
     if (autoOn) autoOn.stop();
     try { fs.unlinkSync(autoPath); } catch (_) {}
@@ -372,6 +398,7 @@ function auth(key) {
     profile_capabilities: { 'GitHub vets-ops': ['purge'] },
   }));
   const otaDb = path.join(os.tmpdir(), 'wt-auth-ota-' + process.pid + '.json');
+  const updatesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-ota-zip-'));
   const zipPath = path.join(__dirname, '../updates/update_core.zip');
   const zipBefore = fs.existsSync(zipPath) ? fs.readFileSync(zipPath) : null;
   fs.writeFileSync(otaDb, JSON.stringify({
@@ -389,6 +416,7 @@ function auth(key) {
       WATCHTOWER_OPERATOR_PROFILE_ID: 'GitHub vets-ops',
       WATCHTOWER_DB_PATH: otaDb,
       WATCHTOWER_PUBLIC_BASE_URL: 'http://hub.example:3000',
+      WATCHTOWER_UPDATES_DIR: updatesDir,
     });
     const uploaded = await request(otaApi.port, 'POST', '/api/v2/ota/upload?group=Ops-Fleet', Object.assign({
       'Content-Type': 'application/zip',
@@ -403,14 +431,54 @@ function auth(key) {
       JSON.stringify(otaBeacon.json)
     );
     check('OTA target does not copy the request Host', !(otaCmd && String(otaCmd.target).includes('evil.example')));
+    check('OTA zip was written under the temp updates dir', fs.existsSync(path.join(updatesDir, 'update_core.zip')));
+    const zipAfter = fs.existsSync(zipPath) ? fs.readFileSync(zipPath) : null;
+    const zipUntouched = (zipBefore === null && zipAfter === null)
+      || (zipBefore && zipAfter && zipBefore.equals(zipAfter));
+    check('OTA test did not write backend/updates/update_core.zip', zipUntouched);
   } finally {
     if (otaApi) otaApi.stop();
     try { fs.unlinkSync(otaDb); } catch (_) {}
-    if (zipBefore === null) {
-      try { fs.unlinkSync(zipPath); } catch (_) {}
-    } else {
-      fs.writeFileSync(zipPath, zipBefore);
-    }
+    try { fs.rmSync(updatesDir, { recursive: true, force: true }); } catch (_) {}
+    try { fs.unlinkSync(capPath); } catch (_) {}
+  }
+
+  fs.writeFileSync(capPath, JSON.stringify({
+    host_group_to_profiles: { 'Ops-Fleet': ['GitHub vets-ops'] },
+    ota: { allow_all: false },
+    c2: { destructive_actions: [], audit_blocked_actions: [] },
+    profile_capabilities: { 'GitHub vets-ops': ['purge'] },
+  }));
+  const otaDbPlain = path.join(os.tmpdir(), 'wt-auth-ota-plain-' + process.pid + '.json');
+  const plainUpdates = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-ota-plain-'));
+  fs.writeFileSync(otaDbPlain, JSON.stringify({
+    alerts: [],
+    threats: [],
+    assets: {},
+    groups: { 'Ops-Fleet': {} },
+    deviceGroups: { 'ops-1': 'Ops-Fleet' },
+  }));
+  let otaPlain;
+  try {
+    otaPlain = await startApi({
+      WATCHTOWER_API_KEY: KEY,
+      WATCHTOWER_ALLOWLIST_PATH: capPath,
+      WATCHTOWER_OPERATOR_PROFILE_ID: 'GitHub vets-ops',
+      WATCHTOWER_DB_PATH: otaDbPlain,
+      WATCHTOWER_UPDATES_DIR: plainUpdates,
+      WATCHTOWER_PUBLIC_BASE_URL: '',
+    });
+    const refused = await request(otaPlain.port, 'POST', '/api/v2/ota/upload?group=Ops-Fleet', Object.assign({
+      'Content-Type': 'application/zip',
+    }, auth(KEY)), Buffer.from('PK\x03\x04fixture'));
+    check('OTA upload without a public base is refused', refused.status === 503 && refused.json && refused.json.error === 'OTA unavailable', JSON.stringify(refused.json));
+    check('refused OTA body has no loopback URL', !refused.body.includes('127.0.0.1'));
+    check('refused OTA did not write a zip', !fs.existsSync(path.join(plainUpdates, 'update_core.zip')));
+    check('startup warns when the public base is unset', otaPlain.log().includes('WATCHTOWER_PUBLIC_BASE_URL is unset'));
+  } finally {
+    if (otaPlain) otaPlain.stop();
+    try { fs.unlinkSync(otaDbPlain); } catch (_) {}
+    try { fs.rmSync(plainUpdates, { recursive: true, force: true }); } catch (_) {}
     try { fs.unlinkSync(capPath); } catch (_) {}
   }
 
@@ -443,6 +511,54 @@ function auth(key) {
     check(label + ' log refuses startup', log.includes('Refusing to start'));
     check(label + ' log does not contain the key', secretNeedles.every((needle) => needle === '' || !log.includes(needle)), log);
   }
+
+  const repoRoot = path.join(__dirname, '../..');
+  const backendDir = path.join(__dirname, '..');
+  const expectedData = path.resolve(repoRoot, 'data');
+  const cwdData = path.resolve(backendDir, 'data');
+  const cwdDataBefore = fs.existsSync(cwdData);
+  const dataPort = await freePort();
+  const dataChild = spawn(process.execPath, [path.join(backendDir, 'app.js')], {
+    cwd: backendDir,
+    env: Object.assign({}, process.env, {
+      WATCHTOWER_API_KEY: KEY,
+      WATCHTOWER_API_PORT: String(dataPort),
+      WATCHTOWER_BIND_ADDRESS: '127.0.0.1',
+      WATCHTOWER_DATA_DIR: './data',
+      WATCHTOWER_DB_PATH: path.join(os.tmpdir(), 'wt-cwd-db-' + process.pid + '.json'),
+    }),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let dataLog = '';
+  const dataCode = await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      dataChild.kill('SIGTERM');
+      resolve('listening');
+    }, 4000);
+    const take = (chunk) => {
+      dataLog += chunk.toString();
+      if (dataLog.includes('Server listening')) {
+        clearTimeout(timer);
+        dataChild.kill('SIGTERM');
+        resolve('listening');
+      }
+    };
+    dataChild.stdout.on('data', take);
+    dataChild.stderr.on('data', take);
+    dataChild.on('exit', (code) => {
+      clearTimeout(timer);
+      if (!dataLog.includes('Server listening')) resolve(code);
+    });
+  });
+  check('server started from backend/ with ./data', dataCode === 'listening', dataLog);
+  check(
+    'WATCHTOWER_DATA_DIR=./data from backend/ is repo data/',
+    dataLog.includes('[Watchtower DB] Data directory ' + expectedData),
+    dataLog
+  );
+  check('that start did not select backend/data', !dataLog.includes(cwdData), dataLog);
+  if (!cwdDataBefore) check('that start did not create backend/data', !fs.existsSync(cwdData));
+  try { fs.unlinkSync(path.join(os.tmpdir(), 'wt-cwd-db-' + process.pid + '.json')); } catch (_) {}
 
   await expectRefuse('unset key', { WATCHTOWER_API_KEY: undefined }, ['WATCHTOWER_DEFAULT_KEY']);
   await expectRefuse('empty key', { WATCHTOWER_API_KEY: '' }, []);
