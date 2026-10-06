@@ -6,13 +6,23 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { Server } = require('socket.io');
-const { keysEqual } = require('./auth');
+const { keysEqual, requireOperatorKey } = require('./auth');
+const { ipAllowed } = require('./ip_allow');
 
 const app = express();
 const server = http.createServer(app);
+
+function configuredUiOrigin() {
+    const explicit = process.env.WATCHTOWER_UI_ORIGIN;
+    if (explicit && String(explicit).trim()) return String(explicit).trim();
+    const uiPort = process.env.WATCHTOWER_UI_PORT || '8080';
+    return 'http://127.0.0.1:' + uiPort;
+}
+
+const UI_ORIGIN = configuredUiOrigin();
 const io = new Server(server, {
     cors: {
-        origin: "*", // Will restrict this to frontend domain later
+        origin: UI_ORIGIN,
         methods: ["GET", "POST"]
     }
 });
@@ -22,35 +32,50 @@ const port = process.env.WATCHTOWER_API_PORT || 3000;
 // ------------------------------------------------------------------
 // CONFIGURATION
 // ------------------------------------------------------------------
-const BIND_ADDRESS = process.env.WATCHTOWER_BIND_ADDRESS || '0.0.0.0'; 
-const API_KEY = process.env.WATCHTOWER_API_KEY || "WATCHTOWER_DEFAULT_KEY"; 
+const BIND_ADDRESS = process.env.WATCHTOWER_BIND_ADDRESS || '0.0.0.0';
+const API_KEY = requireOperatorKey(process.env.WATCHTOWER_API_KEY);
 let c2Queue = {};
 
-console.log(`[Watchtower Command Center] Operator API key ${process.env.WATCHTOWER_API_KEY ? 'loaded from environment' : 'using built-in placeholder'}`);
+console.log('[Watchtower Command Center] Operator API key loaded from environment');
 console.log(`[Watchtower API Gateway] Listening on ${BIND_ADDRESS}:${port}`);
 
-app.use(cors());
+app.set('trust proxy', false);
+app.use(cors({ origin: UI_ORIGIN, methods: ['GET', 'POST', 'DELETE'] }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.raw({ type: 'application/zip', limit: '50mb' }));
-app.use('/updates', express.static(__dirname + '/updates'));
-app.use('/assets', express.static(path.join(__dirname, '../assets')));
 
-// SECURITY: IP Whitelisting Middleware
+// SECURITY: IP allowlist. Static mounts are after this gate.
 app.use((req, res, next) => {
-    const ip = req.ip || req.connection.remoteAddress;
-    if (ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip === "169.254.204.75" || ip === "::ffff:169.254.204.75" || ip.includes("100.")) {
+    const ip = req.ip || (req.connection && req.connection.remoteAddress);
+    if (ipAllowed(ip)) {
         next();
     } else {
         console.warn(`[SECURITY] Blocked unauthorized access attempt from IP: ${ip}`);
         res.status(403).send("403 Forbidden: Access restricted to Tailscale/Local network.");
     }
 });
+app.use('/updates', express.static(path.join(__dirname, 'updates')));
+app.use('/assets', express.static(path.join(__dirname, '../assets')));
 
 // ------------------------------------------------------------------
 // IN-MEMORY DATABASE (MVP)
 // ------------------------------------------------------------------
 
 const allowlist = require('./allowlist');
+
+/** Queue a beacon command. Destructive verbs require purge capability, even when the group allowlist flag is off. */
+function queueHostCommand(host, action, target) {
+    if (allowlist.isPurgeOrDestructiveAction(action)) {
+        const deny = allowlist.assertPurgeCapability();
+        if (deny) {
+            console.warn(`[C2 PURGE DENY] ${deny.rule} action=${action} host=${host}`);
+            return deny;
+        }
+    }
+    if (!c2Queue[host]) c2Queue[host] = [];
+    c2Queue[host].push({ action: action, target: target, timestamp: Date.now() });
+    return null;
+}
 
 const DB_FILE = process.env.WATCHTOWER_DB_PATH || path.join(__dirname, '../data/watchtower_db.json');
 if (!fs.existsSync(path.dirname(DB_FILE))) {
@@ -110,7 +135,8 @@ function registerAsset(source, ip) {
 // ------------------------------------------------------------------
 
 io.use((socket, next) => {
-    const token = socket.handshake.auth && socket.handshake.auth.token;
+    const headerKey = socket.handshake.headers && socket.handshake.headers['x-api-key'];
+    const token = (socket.handshake.auth && socket.handshake.auth.token) || headerKey;
     if (keysEqual(token, API_KEY)) {
         return next();
     }
@@ -146,26 +172,34 @@ io.on('connection', (socket) => {
     }
     console.log(`[C2 COMMAND RECEIVED] Action: ${cmd.action}, Target: ${cmd.target}, Host: ${cmd.host}`);
 
-    // Allowlist adapter: host-scoped deny for unmapped/missing/wrong-profile/audit
-    if (allowlist.isEnabled()) {
-        const deny = allowlist.assertC2Command(cmd, deviceGroupMap, groupDB);
-        if (deny) {
-            console.warn(`[C2 ALLOWLIST DENY] ${deny.rule} host=${cmd && cmd.host}`);
-            socket.emit('c2_result', {
-                action: cmd && cmd.action,
-                target: cmd && cmd.target,
-                host: cmd && cmd.host,
-                result: allowlist.socketDenyPayload(deny),
-                allowlist_denied: true
-            });
-            return;
-        }
+    // Allowlist adapter: host-scoped deny for unmapped/missing/wrong-profile/audit/purge.
+    // Not gated on WATCHTOWER_ALLOWLIST (that switch cannot turn enforcement off).
+    const deny = allowlist.assertC2Command(cmd, deviceGroupMap, groupDB);
+    if (deny) {
+        console.warn(`[C2 ALLOWLIST DENY] ${deny.rule} host=${cmd && cmd.host}`);
+        socket.emit('c2_result', {
+            action: cmd && cmd.action,
+            target: cmd && cmd.target,
+            host: cmd && cmd.host,
+            result: allowlist.socketDenyPayload(deny),
+            allowlist_denied: true
+        });
+        return;
     }
     
     // If it's a remote host, queue it for the beacon
     if (cmd.host && cmd.host !== 'mac-mini-hub' && cmd.host !== 'Local-Node' && cmd.host !== 'localhost' && cmd.host !== 'Austins-Mac-mini.local') {
-        if (!c2Queue[cmd.host]) c2Queue[cmd.host] = [];
-        c2Queue[cmd.host].push({ action: cmd.action, target: cmd.target, timestamp: Date.now() });
+        const queued = queueHostCommand(cmd.host, cmd.action, cmd.target);
+        if (queued) {
+            socket.emit('c2_result', {
+                action: cmd.action,
+                target: cmd.target,
+                host: cmd.host,
+                result: allowlist.socketDenyPayload(queued),
+                allowlist_denied: true
+            });
+            return;
+        }
         console.log(`[C2 QUEUED] Command queued for remote host: ${cmd.host}`);
         
         io.emit('new_threat_intel', {
@@ -185,11 +219,15 @@ io.on('connection', (socket) => {
     const venvPython = process.env.PYTHON_BIN || 'python3';
     const { execFile } = require('child_process');
     
-    execFile(venvPython, [scriptPath, '--action', cmd.action, '--target', cmd.target], (err, stdout, stderr) => {
-        const resultText = stdout || stderr || err?.message || 'Unknown Error';
-        if (err) console.error(`[C2 ERROR] ${resultText}`);
-        else console.log(`[C2 SUCCESS] ${resultText}`);
-        io.emit('c2_result', { action: cmd.action, target: cmd.target, result: resultText.trim() });
+    execFile(venvPython, [scriptPath, '--action', cmd.action, '--target', cmd.target == null ? '' : String(cmd.target)], (err, stdout, stderr) => {
+        if (err) {
+            console.error('[C2 ERROR] ' + (stderr || err.message || 'command failed'));
+            io.emit('c2_result', { ok: false, action: cmd.action, target: cmd.target, error: 'c2_failed' });
+            return;
+        }
+        const resultText = String(stdout || '').trim();
+        console.log('[C2 SUCCESS]');
+        io.emit('c2_result', { ok: true, status: 'ok', action: cmd.action, target: cmd.target, result: resultText });
         
         io.emit('new_threat_intel', {
             id: crypto.randomUUID(),
@@ -197,7 +235,7 @@ io.on('connection', (socket) => {
             source: "Watchtower Command",
             title: `C2 Execution: ${cmd.action.toUpperCase()}`,
             ai_verdict: "RESOLVED",
-            ai_reason: resultText.trim(),
+            ai_reason: 'Command completed',
             severity: "success"
         });
     });
@@ -220,9 +258,8 @@ const authenticate = (req, res, next) => {
     next();
 };
 
-/** §5 rule 9. Returns true when the response is already a coded purge deny. */
+/** §5 rule 9. Independent of WATCHTOWER_ALLOWLIST. Returns true when the response is already a coded purge deny. */
 function denyPurgeWithoutCap(res) {
-    if (!allowlist.isEnabled()) return false;
     return allowlist.sendHttpDeny(res, allowlist.assertPurgeCapability());
 }
 
@@ -381,15 +418,13 @@ app.get('/api/v2/policies/sync', authenticate, (req, res) => {
 app.post('/api/v2/policies/update', authenticate, (req, res) => {
     const { group, policy, host, newGroup } = req.body;
 
-    // Allowlist adapter (CALL A): fail-closed when WATCHTOWER_ALLOWLIST enabled (default ON)
-    if (allowlist.isEnabled()) {
-        if (host && newGroup) {
-            const deny = allowlist.assertReassign(host, newGroup, deviceGroupMap);
-            if (allowlist.sendHttpDeny(res, deny)) return;
-        } else if (group && policy) {
-            const deny = allowlist.assertPolicyGroupWrite(group, groupDB);
-            if (allowlist.sendHttpDeny(res, deny)) return;
-        }
+    // Allowlist adapter (CALL A). WATCHTOWER_ALLOWLIST=0 does not skip this.
+    if (host && newGroup) {
+        const deny = allowlist.assertReassign(host, newGroup, deviceGroupMap);
+        if (allowlist.sendHttpDeny(res, deny)) return;
+    } else if (group && policy) {
+        const deny = allowlist.assertPolicyGroupWrite(group, groupDB);
+        if (allowlist.sendHttpDeny(res, deny)) return;
     }
     
     if (host && newGroup) {
@@ -422,10 +457,8 @@ app.post('/api/v2/ota/upload', authenticate, (req, res) => {
     const groupName = req.query.group;
     if (!groupName) return res.status(400).json({ error: 'Group parameter required' });
 
-    if (allowlist.isEnabled()) {
-        const deny = allowlist.assertOtaGroup(groupName);
-        if (allowlist.sendHttpDeny(res, deny)) return;
-    }
+    const deny = allowlist.assertOtaGroup(groupName);
+    if (allowlist.sendHttpDeny(res, deny)) return;
 
     const otaDir = __dirname + '/updates';
     if (!fs.existsSync(otaDir)) fs.mkdirSync(otaDir, { recursive: true });
@@ -454,7 +487,8 @@ app.post('/api/v2/ota/upload', authenticate, (req, res) => {
         console.log(`[OTA] Queued UPDATE_CORE for ${hostsUpdated} host(s) in group ${groupName}`);
         res.json({ status: 'ok', hostsUpdated });
     } catch(e) {
-        res.status(500).json({ error: e.message });
+        console.error('[OTA] Upload failed: ' + (e && e.message ? e.message : 'unknown'));
+        res.status(500).json({ error: 'Upload failed' });
     }
 });
 
@@ -482,23 +516,22 @@ app.post('/api/v2/ingest/threat', authenticate, (req, res) => {
         console.log(`[!] AUTONOMOUS REMEDIATION TRIGGERED for ${host}. Threat level: HIGH.`);
         
         if (host && host !== 'mac-mini-hub' && host !== 'Local-Node' && host !== 'Austins-Mac-mini.local' && host !== 'localhost') {
-            if (!c2Queue[host]) c2Queue[host] = [];
-            
-            // Queue quarantine/disable command automatically
             const action = enrichedPayload.event_type?.includes('AD') ? 'disable_user' : 'quarantine';
-            c2Queue[host].push({ action: action, target: target, timestamp: Date.now() });
-            
-            console.log(`[C2 AUTO-QUEUED] ${action} command queued for ${host}`);
-            
-            io.emit('new_threat_intel', {
-                id: crypto.randomUUID(),
-                ingested_at: new Date().toISOString(),
-                source: "Watchtower Autonomous Responder",
-                title: `Auto-Remediation Triggered: ${action.toUpperCase()}`,
-                ai_verdict: "PENDING_BEACON",
-                ai_reason: `AI flagged event as Malicious/High Severity. Command queued for remote host: ${host}.`,
-                severity: "warning"
-            });
+            const queued = queueHostCommand(host, action, target);
+            if (queued) {
+                console.warn(`[C2 AUTO-REMEDIATE DENY] ${queued.rule} action=${action} host=${host}`);
+            } else {
+                console.log(`[C2 AUTO-QUEUED] ${action} command queued for ${host}`);
+                io.emit('new_threat_intel', {
+                    id: crypto.randomUUID(),
+                    ingested_at: new Date().toISOString(),
+                    source: "Watchtower Autonomous Responder",
+                    title: `Auto-Remediation Triggered: ${action.toUpperCase()}`,
+                    ai_verdict: "PENDING_BEACON",
+                    ai_reason: `AI flagged event as Malicious/High Severity. Command queued for remote host: ${host}.`,
+                    severity: "warning"
+                });
+            }
         }
     }
     
@@ -513,24 +546,28 @@ app.get('/api/memory/search', authenticate, (req, res) => {
     }
 
     const scriptPath = path.join(__dirname, '../core/search_vector_index.py');
+    if (!fs.existsSync(scriptPath)) {
+        console.error('[SCE] Search index script is not present');
+        return res.status(503).json({ error: 'index unavailable' });
+    }
     const venvPython = process.env.PYTHON_BIN || 'python3';
     
     const { execFile } = require('child_process');
     execFile(venvPython, [scriptPath, query], (error, stdout, stderr) => {
         if (error) {
-            console.error(`[SCE] Search Error: ${error}`);
-            return res.status(500).json({ error: 'Failed to execute search script.', details: stderr });
+            console.error('[SCE] Search Error: ' + (stderr || error.message || 'search failed'));
+            return res.status(503).json({ error: 'index unavailable' });
         }
         try {
             const jsonStart = stdout.indexOf('{');
-            if(jsonStart === -1) throw new Error("No JSON found in output");
+            if(jsonStart === -1) throw new Error('No JSON found in output');
             const cleanJson = stdout.substring(jsonStart);
             
             const results = JSON.parse(cleanJson);
             res.json(results);
         } catch (parseError) {
-            console.error(`[SCE] JSON Parse Error: ${parseError}`);
-            res.status(500).json({ error: 'Failed to parse search script output.', details: stdout });
+            console.error('[SCE] JSON Parse Error: ' + (parseError && parseError.message ? parseError.message : 'parse failed'));
+            res.status(503).json({ error: 'index unavailable' });
         }
     });
 });

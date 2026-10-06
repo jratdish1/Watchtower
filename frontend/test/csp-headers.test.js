@@ -15,6 +15,7 @@ const {
   FONT_STYLESHEET_ORIGIN,
   FONT_FILE_ORIGIN,
 } = require('../security_headers');
+const { TEST_OPERATOR_KEY } = require('../../backend/test/spawn_api');
 
 let passed = 0;
 let failed = 0;
@@ -49,9 +50,9 @@ function freePort() {
   });
 }
 
-function get(port, urlPath) {
+function get(port, urlPath, headers) {
   return new Promise((resolve, reject) => {
-    http.get({ hostname: '127.0.0.1', port, path: urlPath }, (res) => {
+    http.get({ hostname: '127.0.0.1', port, path: urlPath, headers: headers || {} }, (res) => {
       const chunks = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {
@@ -92,13 +93,15 @@ function get(port, urlPath) {
   check('Referrer-Policy no-referrer', headers['Referrer-Policy'] === 'no-referrer');
 
   const port = await freePort();
+  const uiEnv = Object.assign({}, process.env, {
+    WATCHTOWER_UI_PORT: String(port),
+    WATCHTOWER_API_KEY: TEST_OPERATOR_KEY,
+    WATCHTOWER_API_PORT: '9',
+  });
+  delete uiEnv.WATCHTOWER_UI_BIND_ADDRESS;
   const child = spawn(process.execPath, [path.join(__dirname, '../serve_ui.js')], {
     cwd: path.join(__dirname, '../..'),
-    env: Object.assign({}, process.env, {
-      WATCHTOWER_UI_PORT: String(port),
-      WATCHTOWER_API_KEY: 'wt-test-operator-key',
-      WATCHTOWER_API_PORT: '9',
-    }),
+    env: uiEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let log = '';
@@ -120,7 +123,29 @@ function get(port, urlPath) {
       });
     });
 
-    const page = await get(port, '/watchtower.html');
+    const login = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port,
+        path: '/login',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString('utf8'),
+        }));
+      });
+      req.on('error', reject);
+      req.end(JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    });
+    const setCookie = login.headers['set-cookie'];
+    const cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie || '').split(';')[0];
+    check('operator login sets a session cookie', login.status === 200 && cookie.indexOf('wt_session=') === 0, String(login.status));
+    const page = await get(port, '/watchtower.html', { Cookie: cookie });
     check('GET /watchtower.html → 200', page.status === 200, String(page.status));
     const csp = page.headers['content-security-policy'];
     const live = directives(csp);
@@ -147,8 +172,11 @@ function get(port, urlPath) {
       !!(scriptNonce && csp && csp.includes("'nonce-" + scriptNonce[1] + "'"))
     );
     check('served HTML has no onclick attributes', !/\son[a-z]+=/i.test(page.body));
+    const page2 = await get(port, '/watchtower.html', { Cookie: cookie });
+    const nonce2 = page2.body.match(/<script nonce="([^"]+)">/);
+    check('nonces differ across responses', !!(scriptNonce && nonce2 && scriptNonce[1] !== nonce2[1]));
 
-    const root = await get(port, '/');
+    const root = await get(port, '/', { Cookie: cookie });
     check('GET / carries nosniff', root.headers['x-content-type-options'] === 'nosniff');
     check('GET / carries a CSP', typeof root.headers['content-security-policy'] === 'string' && root.headers['content-security-policy'].includes("frame-ancestors 'none'"));
   } finally {

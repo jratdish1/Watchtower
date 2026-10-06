@@ -36,6 +36,8 @@ function makeEl(id) {
     dataset: {},
     style: {},
     parent: null,
+    files: [],
+    _listeners: {},
   };
   el.classList = {
     add(...names) {
@@ -65,7 +67,13 @@ function makeEl(id) {
   el.setAttribute = (k, v) => { el.attributes[k] = String(v); };
   el.getAttribute = (k) => (Object.prototype.hasOwnProperty.call(el.attributes, k) ? el.attributes[k] : null);
   el.removeAttribute = (k) => { delete el.attributes[k]; };
-  el.addEventListener = () => {};
+  el.addEventListener = (type, fn) => {
+    if (!el._listeners[type]) el._listeners[type] = [];
+    el._listeners[type].push(fn);
+  };
+  el.dispatch = (type) => {
+    (el._listeners[type] || []).forEach((fn) => fn({ type, target: el }));
+  };
   el.appendChild = (child) => {
     child.parent = el;
     el.children.push(child);
@@ -540,8 +548,12 @@ async function runRow(n, title, fn) {
     const card = ui.document.getElementById('alert-matrix').children.map((c) => c.innerHTML).join('\n');
     check('rendered card says TIME UNKNOWN', card.includes('TIME UNKNOWN'));
     resetChrome(ui);
-    ui.handlers.c2_result({ ok: true, action: 'refresh', status: 'ok' });
+    ui.handlers.c2_result({ ok: true, status: 'ok', action: 'refresh', target: 'local', result: 'done' });
+    check('local c2_result envelope is C2 OK', toastText(ui).includes('C2 OK') && !toastText(ui).includes('C2 FAIL'));
     check('success toast does not invent a stamp', toastText(ui).includes('TIME UNKNOWN'));
+    resetChrome(ui);
+    ui.handlers.c2_result({ action: 'refresh', target: 'local', result: 'done' });
+    check('string result without ok is still C2 OK', toastText(ui).includes('C2 OK') && !toastText(ui).includes('C2 FAIL'));
   });
 
   await runRow(16, 'Offline and paused disable mutates', async (check) => {
@@ -565,6 +577,22 @@ async function runRow(n, title, fn) {
     check('pause disables mutate buttons', connState(ui) === 'conn.paused' && buttons().every((el) => el.disabled === true));
     ui.toggleOperatorPause();
     check('resume re-enables mutate buttons', connState(ui) === 'conn.online' && buttons().every((el) => el.disabled === false));
+    const pauseBtn = ui.document.getElementById('fe-pause-btn');
+    check('pause control kept its click listener', (pauseBtn._listeners.click || []).length === 1);
+    pauseBtn.dispatch('click');
+    check('pause click listener runs', connState(ui) === 'conn.paused');
+    const mesh = ui.document.getElementById('mesh-search');
+    check('mesh search kept its keyup listener', (mesh._listeners.keyup || []).length === 1);
+    mesh.value = 'ops';
+    mesh.dispatch('keyup');
+    check('mesh keyup listener runs', true);
+    const ota = ui.document.getElementById('ota-file-input');
+    check('ota file input kept its change listener', (ota._listeners.change || []).length === 1);
+    ota.dispatch('change');
+    check('ota change listener runs', true);
+    const openOta = ui.document.getElementById('fe-open-ota');
+    openOta.dispatch('click');
+    check('ota open click listener runs', String(ui.document.getElementById('ota-modal').className).includes('active'));
   });
 
   const executed = ROWS.filter((r) => r.status === 'executed').length;

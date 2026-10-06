@@ -6,7 +6,7 @@
  * Base main: ac8cdf2c8d22d51739007edd9a90a8537e13b92a
  *
  * Env:
- *   WATCHTOWER_ALLOWLIST=1|0   feature gate (default ON / fail-closed deny-unmapped)
+ *   WATCHTOWER_ALLOWLIST         ignored when set to 0. Enforcement stays on (fail closed).
  *   WATCHTOWER_OPERATOR_PROFILE_ID  optional; when unset → operator has NO mapped
  *                                   profiles → all mapped-group mutates DENY until
  *                                   Escalation binds + sets env (fail-closed)
@@ -58,11 +58,17 @@ function _envTruthy(name) {
   return null;
 }
 
-/** Feature enabled by default (prod deny-unmapped ON). Disable with WATCHTOWER_ALLOWLIST=0. */
+/**
+ * Enforcement is always on. WATCHTOWER_ALLOWLIST=0 used to skip it (fail open).
+ * That setting is ignored so an operator cannot turn the allowlist off.
+ */
+let _warnedAllowlistOff = false;
 function isEnabled() {
-  const e = _envTruthy('WATCHTOWER_ALLOWLIST');
-  if (e === null) return true;
-  return e;
+  if (_envTruthy('WATCHTOWER_ALLOWLIST') === false && !_warnedAllowlistOff) {
+    _warnedAllowlistOff = true;
+    console.warn('[allowlist] WATCHTOWER_ALLOWLIST=0 is ignored; enforcement stays on (fail closed).');
+  }
+  return true;
 }
 
 /** Fail-closed empty map — omit groups stay denied; no illustrative fall-open. */
@@ -391,7 +397,8 @@ function isPurgeOrDestructiveAction(action) {
   const cfg = loadConfig();
   const list = (cfg.c2 && cfg.c2.destructive_actions) || [];
   if (list.some((x) => String(x).toLowerCase() === a)) return true;
-  return a === 'purge' || a.startsWith('purge_') || a === 'wipe' || a === 'destroy' || a === 'clear';
+  return a === 'purge' || a.startsWith('purge_') || a === 'wipe' || a === 'destroy' || a === 'clear'
+    || a === 'quarantine' || a === 'disable_user';
 }
 
 /**

@@ -153,9 +153,9 @@ test('resolveHostGroup returns missing for unknown host', () => {
   assert.strictEqual(r2.group, 'Default');
 });
 
-test('feature flag OFF skips enforcement posture (isEnabled false)', () => {
+test('WATCHTOWER_ALLOWLIST=0 stays enforced (fail closed)', () => {
   process.env.WATCHTOWER_ALLOWLIST = '0';
-  assert.strictEqual(allowlist.isEnabled(), false);
+  assert.strictEqual(allowlist.isEnabled(), true);
 });
 
 test('OTA ALL allowed only with Exact-GO flag', () => {

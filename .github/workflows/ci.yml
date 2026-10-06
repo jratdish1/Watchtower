@@ -26,5 +26,7 @@ jobs:
         run: node frontend/test/xss-static.test.js
       - name: Glass Pane security headers
         run: node frontend/test/csp-headers.test.js
+      - name: Glass Pane operator session
+        run: node frontend/test/ui-auth.test.js
       - name: Step 5 isolated harness
         run: node frontend/test/step5-harness.test.js

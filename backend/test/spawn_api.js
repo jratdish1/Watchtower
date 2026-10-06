@@ -12,6 +12,7 @@ const net = require('net');
 const { spawn } = require('child_process');
 
 const REPO = path.join(__dirname, '../..');
+const TEST_OPERATOR_KEY = 'wt-test-operator-key-0123456789abcd';
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -59,12 +60,13 @@ async function startApi(extraEnv) {
   const port = await freePort();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-api-'));
   const env = Object.assign({}, process.env, {
-    WATCHTOWER_API_KEY: 'wt-test-operator-key',
+    WATCHTOWER_API_KEY: TEST_OPERATOR_KEY,
     WATCHTOWER_API_PORT: String(port),
     WATCHTOWER_BIND_ADDRESS: '127.0.0.1',
     WATCHTOWER_DB_PATH: path.join(tmp, 'db.json'),
     WATCHTOWER_ALLOWLIST: '1',
     WATCHTOWER_OPERATOR_PROFILE_ID: '',
+    WATCHTOWER_UI_ORIGIN: 'http://127.0.0.1:8080',
   });
   delete env.WATCHTOWER_ALLOWLIST_PATH;
   delete env.WATCHTOWER_OTA_ALLOW_ALL;
@@ -117,4 +119,4 @@ async function startApi(extraEnv) {
   };
 }
 
-module.exports = { REPO, freePort, request, startApi };
+module.exports = { REPO, TEST_OPERATOR_KEY, freePort, request, startApi };

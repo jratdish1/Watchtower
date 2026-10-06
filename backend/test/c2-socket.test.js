@@ -10,9 +10,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const io = require(path.join(__dirname, '../../frontend/node_modules/socket.io-client'));
-const { startApi } = require('./spawn_api');
+const { startApi, TEST_OPERATOR_KEY } = require('./spawn_api');
 
-const KEY = 'wt-test-operator-key';
+const KEY = TEST_OPERATOR_KEY;
 let passed = 0;
 let failed = 0;
 

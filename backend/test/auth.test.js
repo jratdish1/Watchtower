@@ -10,10 +10,12 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { keysEqual } = require('../auth');
-const { request, startApi } = require('./spawn_api');
+const { spawn } = require('child_process');
+const { keysEqual, operatorKeyProblem, MIN_OPERATOR_KEY_LENGTH } = require('../auth');
+const { ipAllowed } = require('../ip_allow');
+const { request, startApi, TEST_OPERATOR_KEY } = require('./spawn_api');
 
-const KEY = 'wt-test-operator-key';
+const KEY = TEST_OPERATOR_KEY;
 let passed = 0;
 let failed = 0;
 
@@ -43,6 +45,25 @@ function auth(key) {
   check('empty provided fails', keysEqual('', KEY) === false);
   check('missing provided fails', keysEqual(undefined, KEY) === false);
   check('empty expected fails closed', keysEqual(KEY, '') === false);
+  check('unset key is rejected', operatorKeyProblem(undefined) === 'unset');
+  check('empty key is rejected', operatorKeyProblem('') === 'empty' && operatorKeyProblem('   ') === 'empty');
+  check('default literal is rejected', operatorKeyProblem('WATCHTOWER_DEFAULT_KEY') === 'placeholder');
+  check('html placeholder is rejected', operatorKeyProblem('YOUR_SECRET_API_KEY_HERE') === 'placeholder');
+  check('short key is rejected', operatorKeyProblem('a'.repeat(MIN_OPERATOR_KEY_LENGTH - 1)) === 'too_short');
+  check('32 character private key is accepted', operatorKeyProblem('b'.repeat(MIN_OPERATOR_KEY_LENGTH)) === null);
+  check('loopback is allowed', ipAllowed('127.0.0.1') && ipAllowed('::1') && ipAllowed('::ffff:127.0.0.1'));
+  check('CGNAT 100.64.0.0/10 is allowed', ipAllowed('100.64.0.0') && ipAllowed('100.127.255.255') && ipAllowed('::ffff:100.100.1.1'));
+  check('substring 100. does not match', !ipAllowed('100.1.2.3') && !ipAllowed('100.128.0.0') && !ipAllowed('100.63.255.255') && !ipAllowed('10.0.0.100'));
+
+  const appSrc = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
+  const ipAt = appSrc.indexOf('ipAllowed(');
+  const updatesAt = appSrc.indexOf("app.use('/updates'");
+  const assetsAt = appSrc.indexOf("app.use('/assets'");
+  check('updates static is mounted after the IP allowlist', ipAt !== -1 && updatesAt > ipAt);
+  check('assets static is mounted after the IP allowlist', assetsAt > ipAt);
+  check('CORS is not wildcard', !/origin:\s*["']\*["']/.test(appSrc));
+  check('search errors are generic', appSrc.includes("error: 'index unavailable'") && !appSrc.includes('details: stderr'));
+  check('local c2 success sets ok', /io\.emit\('c2_result', \{ ok: true, status: 'ok'/.test(appSrc));
 
   const allowPath = path.join(os.tmpdir(), 'wt-auth-allow-' + process.pid + '.json');
   fs.writeFileSync(
@@ -115,6 +136,27 @@ function auth(key) {
     const memoryNoQuery = await request(api.port, 'GET', '/api/memory/search', auth(KEY));
     check('GET /api/memory/search valid key without q → 400', memoryNoQuery.status === 400, String(memoryNoQuery.status));
 
+    const memoryMissingIndex = await request(api.port, 'GET', '/api/memory/search?q=fixture', auth(KEY));
+    check('GET /api/memory/search missing index → 503', memoryMissingIndex.status === 503, String(memoryMissingIndex.status));
+    check(
+      'GET /api/memory/search 503 body is generic',
+      memoryMissingIndex.json && memoryMissingIndex.json.error === 'index unavailable' && !memoryMissingIndex.json.details,
+      JSON.stringify(memoryMissingIndex.json)
+    );
+
+    const corsEvil = await request(api.port, 'GET', '/api/v1/heartbeat', { Origin: 'https://evil.example' });
+    check(
+      'CORS does not reflect an arbitrary origin',
+      corsEvil.headers['access-control-allow-origin'] !== '*' && corsEvil.headers['access-control-allow-origin'] !== 'https://evil.example',
+      String(corsEvil.headers['access-control-allow-origin'])
+    );
+    const corsUi = await request(api.port, 'GET', '/api/v1/heartbeat', { Origin: 'http://127.0.0.1:8080' });
+    check(
+      'CORS allows the default UI origin',
+      corsUi.headers['access-control-allow-origin'] === 'http://127.0.0.1:8080',
+      String(corsUi.headers['access-control-allow-origin'])
+    );
+
     const heartbeat = await request(api.port, 'GET', '/api/v1/heartbeat');
     check(
       'GET /api/v1/heartbeat stays open and is not fleet data',
@@ -180,6 +222,126 @@ function auth(key) {
     try { fs.unlinkSync(allowPath); } catch (_) {}
     try { fs.unlinkSync(capPath); } catch (_) {}
   }
+
+  let flagOff;
+  try {
+    flagOff = await startApi({
+      WATCHTOWER_API_KEY: KEY,
+      WATCHTOWER_ALLOWLIST: '0',
+      WATCHTOWER_ALLOWLIST_PATH: allowPath,
+      WATCHTOWER_OPERATOR_PROFILE_ID: 'GitHub vets-ops',
+    });
+    fs.writeFileSync(infraPath, '{"ip":"203.0.113.10"}\n');
+    const stillDenied = await request(flagOff.port, 'DELETE', '/api/v2/infrastructure', auth(KEY));
+    check('ALLOWLIST=0 still denies purge', stillDenied.status === 403, JSON.stringify(stillDenied.json));
+    check('ALLOWLIST=0 left the infrastructure file', fs.existsSync(infraPath));
+  } finally {
+    if (flagOff) flagOff.stop();
+    try { fs.unlinkSync(infraPath); } catch (_) {}
+  }
+
+  const autoPath = path.join(os.tmpdir(), 'wt-auth-auto-' + process.pid + '.json');
+  fs.writeFileSync(autoPath, JSON.stringify({
+    host_group_to_profiles: { Default: ['GitHub vets-ops'] },
+    ota: { allow_all: false },
+    c2: { destructive_actions: [], audit_blocked_actions: [] },
+    profile_capabilities: {},
+  }));
+  let autoOff;
+  let autoOn;
+  try {
+    autoOff = await startApi({
+      WATCHTOWER_API_KEY: KEY,
+      WATCHTOWER_ALLOWLIST_PATH: autoPath,
+      WATCHTOWER_OPERATOR_PROFILE_ID: 'GitHub vets-ops',
+      AUTO_REMEDIATE: 'true',
+    });
+    const ingested = await request(autoOff.port, 'POST', '/api/v2/ingest/threat', Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), JSON.stringify({
+      source: 'remote-fixture',
+      ai_verdict: 'MALICIOUS',
+      file_path: '/tmp/fixture',
+      event_type: 'FILE',
+    }));
+    check('threat ingest without purge cap → 201', ingested.status === 201, String(ingested.status));
+    const beacon = await request(autoOff.port, 'GET', '/api/v2/c2/beacon?host=remote-fixture', auth(KEY));
+    check(
+      'AUTO_REMEDIATE does not queue quarantine without purge cap',
+      beacon.status === 200 && beacon.json && Array.isArray(beacon.json.commands) && beacon.json.commands.length === 0,
+      JSON.stringify(beacon.json)
+    );
+  } finally {
+    if (autoOff) autoOff.stop();
+  }
+
+  fs.writeFileSync(autoPath, JSON.stringify({
+    host_group_to_profiles: { Default: ['GitHub vets-ops'] },
+    ota: { allow_all: false },
+    c2: { destructive_actions: ['quarantine'], audit_blocked_actions: [] },
+    profile_capabilities: { 'GitHub vets-ops': ['purge'] },
+  }));
+  try {
+    autoOn = await startApi({
+      WATCHTOWER_API_KEY: KEY,
+      WATCHTOWER_ALLOWLIST_PATH: autoPath,
+      WATCHTOWER_OPERATOR_PROFILE_ID: 'GitHub vets-ops',
+      AUTO_REMEDIATE: 'true',
+    });
+    const ingested = await request(autoOn.port, 'POST', '/api/v2/ingest/threat', Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), JSON.stringify({
+      source: 'remote-fixture',
+      ai_verdict: 'MALICIOUS',
+      file_path: '/tmp/fixture',
+      event_type: 'FILE',
+    }));
+    check('threat ingest with purge cap → 201', ingested.status === 201, String(ingested.status));
+    const beacon = await request(autoOn.port, 'GET', '/api/v2/c2/beacon?host=remote-fixture', auth(KEY));
+    check(
+      'AUTO_REMEDIATE queues quarantine when the profile has purge',
+      beacon.status === 200 && beacon.json && beacon.json.commands && beacon.json.commands.some((c) => c.action === 'quarantine'),
+      JSON.stringify(beacon.json)
+    );
+  } finally {
+    if (autoOn) autoOn.stop();
+    try { fs.unlinkSync(autoPath); } catch (_) {}
+  }
+
+  async function expectRefuse(label, envOverlay, secretNeedles) {
+    const env = Object.assign({}, process.env);
+    delete env.WATCHTOWER_API_KEY;
+    if (envOverlay) Object.assign(env, envOverlay);
+    if (envOverlay && Object.prototype.hasOwnProperty.call(envOverlay, 'WATCHTOWER_API_KEY') && envOverlay.WATCHTOWER_API_KEY === undefined) {
+      delete env.WATCHTOWER_API_KEY;
+    }
+    const child = spawn(process.execPath, [path.join(__dirname, '../app.js')], {
+      cwd: path.join(__dirname, '../..'),
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let log = '';
+    const code = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM');
+        resolve('timeout');
+      }, 4000);
+      child.stdout.on('data', (chunk) => { log += chunk.toString(); });
+      child.stderr.on('data', (chunk) => { log += chunk.toString(); });
+      child.on('exit', (exitCode) => {
+        clearTimeout(timer);
+        resolve(exitCode);
+      });
+    });
+    check(label + ' exits non-zero', code !== 0 && code !== 'timeout', String(code) + ' ' + log);
+    check(label + ' log refuses startup', log.includes('Refusing to start'));
+    check(label + ' log does not contain the key', secretNeedles.every((needle) => needle === '' || !log.includes(needle)), log);
+  }
+
+  await expectRefuse('unset key', { WATCHTOWER_API_KEY: undefined }, ['WATCHTOWER_DEFAULT_KEY']);
+  await expectRefuse('empty key', { WATCHTOWER_API_KEY: '' }, []);
+  await expectRefuse('placeholder key', { WATCHTOWER_API_KEY: 'WATCHTOWER_DEFAULT_KEY' }, ['WATCHTOWER_DEFAULT_KEY']);
+  await expectRefuse('short key', { WATCHTOWER_API_KEY: 'short-key-value' }, ['short-key-value']);
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
