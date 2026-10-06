@@ -358,6 +358,30 @@ function cookiePair(res) {
       crossOrigin.includes('403') && !crossOrigin.includes('101'),
       crossOrigin
     );
+    const missingOrigin = await new Promise((resolve) => {
+      const sock = net.connect(uiPort, '127.0.0.1', () => {
+        sock.write(
+          'GET /socket.io/?EIO=4&transport=websocket HTTP/1.1\r\n'
+          + 'Host: 127.0.0.1:' + uiPort + '\r\n'
+          + 'Upgrade: websocket\r\n'
+          + 'Connection: Upgrade\r\n'
+          + 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+          + 'Sec-WebSocket-Version: 13\r\n'
+          + 'Cookie: ' + cookie + '\r\n'
+          + '\r\n'
+        );
+      });
+      let data = '';
+      const timer = setTimeout(() => { sock.destroy(); resolve(data); }, 2000);
+      sock.on('data', (chunk) => { data += chunk.toString('utf8'); });
+      sock.on('error', () => {});
+      sock.on('close', () => { clearTimeout(timer); resolve(data); });
+    });
+    check(
+      'WebSocket upgrade without Origin is refused before 101',
+      missingOrigin.includes('403') && !missingOrigin.includes('101'),
+      missingOrigin
+    );
 
     const live = await new Promise((resolve) => {
       const socket = io('http://127.0.0.1:' + uiPort, {
