@@ -213,12 +213,6 @@ socket.on('disconnect', () => {
 // ------------------------------------------------------------------
 const authenticate = (req, res, next) => {
     const clientKey = req.headers['x-api-key'];
-    // GET /api/alerts and GET /api/agents use this same check (no GET bypass).
-    // /api/memory/search stays on its existing GET bypass.
-    if (req.method === 'GET' && req.path.startsWith('/api/memory/search')) {
-        return next();
-    }
-
     if (!keysEqual(clientKey, API_KEY)) {
         console.warn(`[Auth Failure] IP: ${req.ip}. Missing or invalid API key.`);
         return res.status(401).json({ error: 'Unauthorized: Invalid or missing API Key' });

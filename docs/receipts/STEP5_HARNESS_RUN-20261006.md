@@ -1,6 +1,6 @@
 # Step 5 harness run — 2026-10-06
 
-**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC)
+**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC).
 **Runner:** isolated CI/VM (this workspace). No live hosts.
 **Node:** `v22.14.0`
 **Paper:** `jratdish1/knowledge-base` `ops/vao-torch/tasks/VAO-TASK-20261002-STEP5-HARNESS-PAPER.md` (blob `0940f85c3d297b3ce9f9744e87795e3075d902ad`). `gh api repos/jratdish1/knowledge-base/contents/...` returned HTTP 404; the file was read through the authenticated contents API. Paper score at plant: 16 specified, 0 executed. This receipt is the run.
@@ -12,10 +12,10 @@
 | | SHA |
 |--|-----|
 | base (`main` at branch point) | `383964e7851330ebe3d66ad1eb0fd0371f9b984f` |
-| implementation (`git rev-parse HEAD` of the code + test log) | `ee8fd38a1bc0bda3e37d13a1540f2d9a99841cd9` |
-| head (branch tip that recorded the implementation id) | `97289fa8a48e575bde58dc76f33b63c584d03de7` |
+| prior tip (before memory-search auth) | `961f93088464db81f5b913b9c0a6e64c8b779703` |
+| head (memory-search auth commit) | `HEAD_SHA_PLACEHOLDER` |
 
-Commands above were run on the implementation tree `ee8fd38a1bc0bda3e37d13a1540f2d9a99841cd9`. Commit `97289fa8a48e575bde58dc76f33b63c584d03de7` is the branch tip that wrote that id into this receipt. A commit object cannot contain its own id, so if `git rev-parse HEAD` is a child of `97289fa8a48e575bde58dc76f33b63c584d03de7`, that child only records this line and the pull request description repeats the child id. The pull request description is updated to the exact `git rev-parse HEAD` after the final push.
+`head` is the commit that removes the `GET /api/memory/search` bypass and records these totals. The pull request description repeats `git rev-parse HEAD` after push. A commit object cannot contain its own id, so if the branch tip is a child of `head`, that child only stamps this hash.
 
 Working directory for every command: repository root.
 
@@ -24,7 +24,7 @@ Working directory for every command: repository root.
 | Command | Exit | Passed | Failed | Skipped |
 |---------|------|--------|--------|---------|
 | `node backend/test/allowlist.test.js` | 0 | 19 | 0 | 0 |
-| `node backend/test/auth.test.js` | 0 | 28 | 0 | 0 |
+| `node backend/test/auth.test.js` | 0 | 34 | 0 | 0 |
 | `node backend/test/c2-socket.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/xss-static.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/csp-headers.test.js` | 0 | 32 | 0 | 0 |
@@ -32,7 +32,7 @@ Working directory for every command: repository root.
 
 Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=52 failed=0 skipped=0`
 
-Combined checks: **153 passed, 0 failed, 0 skipped.**
+Combined checks: **159 passed, 0 failed, 0 skipped.** Auth gained 6 checks (28 → 34) for `GET /api/memory/search` and the heartbeat non-fleet probe. Other files unchanged: 19 + 11 + 11 + 32 + 52.
 
 ## Step 5 matrix (16)
 
@@ -72,11 +72,42 @@ These paths were not required by any row and were not used:
 | Contabo | No Contabo host, disk, or credentials. Deploy is out of scope. |
 | Real fleet host | No enrolled beacon. C2 against a remote host is not executed; destructive actions are denied or queued in memory only. |
 
+## Fleet-data GET and WebSocket auth
+
+Audit of `backend/app.js` after the memory-search close. Operator check is `keysEqual` (`crypto.timingSafeEqual`). Missing or invalid key: HTTP 401, or WebSocket `Authentication error`.
+
+### Closed in this change
+
+| Route | Was | Now |
+|-------|-----|-----|
+| `GET /api/memory/search` | `authenticate` skipped every GET on this path, then ran the cognitive search | Same operator key. Missing, wrong, and prefix keys → 401. Valid key with no `q` → 400 (handler reached, no search). |
+
+### Already gated (fleet data, no change this pass)
+
+| Route | Fleet data | Gate |
+|-------|------------|------|
+| `GET /api/alerts` | Alert store | `authenticate` |
+| `GET /api/agents` | Agent list | `authenticate` |
+| `GET /api/v2/topology` | Topology rows | `authenticate` |
+| `GET /api/v2/c2/beacon` | Queued C2 for a host | `authenticate` |
+| `GET /api/v2/policies/sync` | Host group policy | `authenticate` |
+| WebSocket `/socket.io/` | `sync_state` sends alerts, threats, assets, inventory, groups, deviceGroups. Later events (`c2_command`, inventory, threats) ride the same connection | `io.use` + `keysEqual` before `connection`. Invalid key does not connect (`c2-socket.test.js`) |
+
+No other unauthenticated GET or WebSocket route returns fleet data.
+
+### Inspected and left open (not fleet data)
+
+| Route | Returns | Why it stays open |
+|-------|---------|-------------------|
+| `GET /api/v1/heartbeat` | `{ status: 'ok', timestamp }` | Liveness only. Test asserts it has no alerts or agents. |
+| `GET /assets/*` | UI static files | Logo and other assets, not fleet records. |
+| `GET /updates/*` | Static update blobs under `backend/updates` | Not a host, alert, inventory, or policy listing. |
+
 ## What else this run covers
 
 Not paper rows. Same VM, same node, exit 0:
 
-- `GET /api/alerts` and `GET /api/agents`: missing, wrong, and prefix keys return 401; the placeholder test key returns 200. Compare is `crypto.timingSafeEqual` over equal-length buffers (`backend/auth.js`).
+- `GET /api/alerts`, `GET /api/agents`, and `GET /api/memory/search`: missing, wrong, and prefix keys return 401. Alerts and agents with the placeholder test key return 200. Memory search with that key and no `q` returns 400. Compare is `crypto.timingSafeEqual` over equal-length buffers (`backend/auth.js`).
 - `DELETE /api/v2/infrastructure` and `DELETE /api/v2/topology`: 403 `allowlist_purge_denied` / `DENY_PURGE_WITHOUT_CAP` without the purge capability (files left in place); 200 when the operator profile lists `purge`.
 - Socket `c2_command`: non-string `action`, null command, and array action emit `invalid_c2_action` and the process stays up. `quarantine` without the cap emits `allowlist_purge_denied`.
 - `serve_ui.js` responses: CSP (`default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `connect-src 'self'`, pinned socket.io script, per-response nonce), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.

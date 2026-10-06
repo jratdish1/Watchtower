@@ -99,6 +99,29 @@ function auth(key) {
     check('GET /api/agents valid key → 200', agentsOk.status === 200, String(agentsOk.status));
     check('GET /api/agents returns an array', Array.isArray(agentsOk.json));
 
+    const memoryMissing = await request(api.port, 'GET', '/api/memory/search?q=fixture');
+    check('GET /api/memory/search missing key → 401', memoryMissing.status === 401, String(memoryMissing.status));
+    check(
+      'GET /api/memory/search missing key body',
+      memoryMissing.json && memoryMissing.json.error === 'Unauthorized: Invalid or missing API Key'
+    );
+
+    const memoryBad = await request(api.port, 'GET', '/api/memory/search?q=fixture', auth(KEY.slice(0, -1) + 'Z'));
+    check('GET /api/memory/search wrong key → 401', memoryBad.status === 401, String(memoryBad.status));
+
+    const memoryPrefix = await request(api.port, 'GET', '/api/memory/search?q=fixture', auth(KEY.slice(0, 4)));
+    check('GET /api/memory/search prefix key → 401', memoryPrefix.status === 401, String(memoryPrefix.status));
+
+    const memoryNoQuery = await request(api.port, 'GET', '/api/memory/search', auth(KEY));
+    check('GET /api/memory/search valid key without q → 400', memoryNoQuery.status === 400, String(memoryNoQuery.status));
+
+    const heartbeat = await request(api.port, 'GET', '/api/v1/heartbeat');
+    check(
+      'GET /api/v1/heartbeat stays open and is not fleet data',
+      heartbeat.status === 200 && heartbeat.json && heartbeat.json.status === 'ok' && !heartbeat.json.alerts && !heartbeat.json.agents,
+      JSON.stringify(heartbeat.json)
+    );
+
     const purgeInfra = await request(api.port, 'DELETE', '/api/v2/infrastructure', auth(KEY));
     check('DELETE infrastructure without purge cap → 403', purgeInfra.status === 403, JSON.stringify(purgeInfra.json));
     check(
