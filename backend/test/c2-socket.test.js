@@ -150,6 +150,15 @@ function once(socket, event) {
       JSON.stringify(purge)
     );
 
+    const rollbackWait = once(socket, 'c2_result');
+    socket.emit('c2_command', { action: 'rollback', target: '/tmp/x', host: 'ops-1' });
+    const rollback = await rollbackWait;
+    check(
+      'rollback is not accepted over the socket',
+      rollback && rollback.ok === false && rollback.error === 'invalid_c2_action' && !rollback.allowlist_denied,
+      JSON.stringify(rollback)
+    );
+
     for (const action of ['UPDATE_CORE', 'UPDATE_POLICY']) {
       const reservedWait = once(socket, 'c2_result');
       socket.emit('c2_command', { action, target: 'http://evil.example/update_core.zip', host: 'ops-1', hmac: 'abc' });

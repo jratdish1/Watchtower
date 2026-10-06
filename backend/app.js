@@ -196,7 +196,7 @@ function registerAsset(source, ip) {
 // WEBSOCKETS (Task 1.2)
 // ------------------------------------------------------------------
 
-const OPERATOR_SOCKET_ACTIONS = new Set(['quarantine', 'lock_dir', 'kill', 'disable_user', 'rollback']);
+const OPERATOR_SOCKET_ACTIONS = new Set(['quarantine', 'lock_dir', 'kill', 'disable_user']);
 const RESERVED_QUEUE_ACTIONS = new Set(['update_core', 'update_policy']);
 
 io.use((socket, next) => {

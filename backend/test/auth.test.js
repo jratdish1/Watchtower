@@ -50,6 +50,10 @@ function auth(key) {
   check('default literal is rejected', operatorKeyProblem('WATCHTOWER_DEFAULT_KEY') === 'placeholder');
   check('html placeholder is rejected', operatorKeyProblem('YOUR_SECRET_API_KEY_HERE') === 'placeholder');
   check('short key is rejected', operatorKeyProblem('a'.repeat(MIN_OPERATOR_KEY_LENGTH - 1)) === 'too_short');
+  check(
+    '31 character key plus two spaces is rejected',
+    operatorKeyProblem('d'.repeat(31) + '  ') === 'too_short' && operatorKeyProblem('  ' + 'd'.repeat(31)) === 'too_short'
+  );
   check('32 character private key is accepted', operatorKeyProblem('b'.repeat(MIN_OPERATOR_KEY_LENGTH)) === null);
   check('template example key is rejected', operatorKeyProblem('generate_a_secure_random_key_here') === 'placeholder');
   check(
@@ -661,6 +665,7 @@ function auth(key) {
   await expectRefuse('template example key', { WATCHTOWER_API_KEY: 'generate_a_secure_random_key_here' }, ['generate_a_secure_random_key_here']);
   await expectRefuse('padded placeholder key', { WATCHTOWER_API_KEY: '  generate_a_secure_random_key_here  ' }, ['generate_a_secure_random_key_here']);
   await expectRefuse('short key', { WATCHTOWER_API_KEY: 'short-key-value' }, ['short-key-value']);
+  await expectRefuse('31 character key plus two spaces', { WATCHTOWER_API_KEY: 'e'.repeat(31) + '  ' }, ['e'.repeat(31)]);
 
   const coreDir = path.join(__dirname, '../../core');
   const fallback = /environ\.get\(\s*["']WATCHTOWER_API_KEY["']\s*,|=\s*["']WATCHTOWER_DEFAULT_KEY["']|=\s*["']YOUR_SECRET_API_KEY_HERE["']/;
@@ -698,6 +703,19 @@ function auth(key) {
     'python client rejects a padded placeholder',
     paddedPy.status === 1 && paddedPyLog.includes('Refusing to start') && !paddedPyLog.includes('generate_a_secure_random_key_here'),
     String(paddedPy.status) + ' ' + paddedPyLog
+  );
+  const shortPad = 'f'.repeat(31) + '  ';
+  const shortPy = spawnSync('python3', ['-c', 'from operator_key import require_operator_key\nrequire_operator_key()'], {
+    cwd: coreDir,
+    env: Object.assign({}, process.env, { WATCHTOWER_API_KEY: shortPad }),
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  const shortPyLog = (shortPy.stderr || '') + (shortPy.stdout || '');
+  check(
+    'python client rejects a 31 character key plus two spaces',
+    shortPy.status === 1 && shortPyLog.includes('Refusing to start') && !shortPyLog.includes(shortPad.trim()),
+    String(shortPy.status) + ' ' + shortPyLog
   );
   const otaZip = path.join(os.tmpdir(), 'wt-ota-probe-' + process.pid + '.zip');
   const otaProbe = spawnSync('python3', ['-c', [
@@ -751,6 +769,7 @@ function auth(key) {
   try { fs.unlinkSync(otaZip); } catch (_) {}
   try { fs.unlinkSync(path.join(coreDir, 'wt-ota-must-not-land.txt')); } catch (_) {}
   check('ad sensor trims before the placeholder list', ps1.includes('$ApiKeyTrimmed') && ps1.includes('$ApiKeyTrimmed -in'));
+  check('ad sensor length check uses the trimmed key', ps1.includes('$ApiKeyTrimmed.Length -lt 32'));
   check('repo data files are unchanged', snapEqual(repoBefore, repoSnap()));
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');

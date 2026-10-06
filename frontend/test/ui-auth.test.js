@@ -361,6 +361,38 @@ function cookiePair(res) {
     });
     check('socket with a session connects', allowed === 'connected', allowed);
 
+    const polled = await new Promise((resolve) => {
+      const socket = io('http://127.0.0.1:' + uiPort, {
+        reconnection: false,
+        timeout: 5000,
+        forceNew: true,
+        extraHeaders: { Cookie: cookie, Origin: 'http://127.0.0.1:' + uiPort },
+      });
+      let firstTransport = '';
+      let gotEvent = false;
+      let upgraded = false;
+      const finish = (result) => { clearTimeout(timer); socket.close(); resolve(result); };
+      const timer = setTimeout(() => finish('timeout:' + firstTransport + ':' + gotEvent + ':' + upgraded), 6000);
+      const maybeDone = () => { if (gotEvent && upgraded && firstTransport === 'polling') finish('event'); };
+      socket.io.on('open', () => {
+        firstTransport = socket.io.engine && socket.io.engine.transport ? socket.io.engine.transport.name : '';
+        if (socket.io.engine) socket.io.engine.on('upgrade', () => { upgraded = true; maybeDone(); });
+      });
+      socket.on('sync_state', (payload) => {
+        if (payload && Array.isArray(payload.alerts)) gotEvent = true;
+        maybeDone();
+      });
+      socket.on('connect_error', (err) => finish('error:' + (err && err.message)));
+    });
+    check('default-transport socket.io through the proxy receives sync_state', polled === 'event', polled);
+
+    const encodedSpace = await rawRequest(uiPort, 'GET', '/api/alerts%20', { Cookie: cookie });
+    check(
+      'percent-encoded space is forwarded raw and is not a 500',
+      encodedSpace.status === 404 && encodedSpace.body.includes('Cannot GET /api/alerts%20') && !/at\s+\S+\.js:\d+/.test(encodedSpace.body),
+      encodedSpace.status + ' ' + encodedSpace.body
+    );
+
     const noOrigin = await rawRequest(uiPort, 'POST', '/api/v2/infrastructure', {
       Cookie: cookie,
       'Content-Type': 'application/json',
@@ -372,6 +404,28 @@ function cookiePair(res) {
       Origin: 'http://127.0.0.1:' + uiPort,
     }, JSON.stringify({ ip: '203.0.113.10', name: 'fixture' }));
     check('proxied POST with a matching Origin succeeds', withOrigin.status === 200, withOrigin.status + ' ' + withOrigin.body);
+    const nullOrigin = await rawRequest(uiPort, 'POST', '/api/v2/infrastructure', {
+      Cookie: cookie,
+      'Content-Type': 'application/json',
+      Origin: 'null',
+    }, JSON.stringify({ ip: '203.0.113.10', name: 'fixture' }));
+    check('Origin null is forbidden on a state-changing proxy request', nullOrigin.status === 403 && nullOrigin.json && nullOrigin.json.error === 'Forbidden', nullOrigin.body);
+    const pane = await rawRequest(uiPort, 'GET', '/watchtower.html', { Cookie: cookie });
+    check(
+      'Glass Pane sets Referrer-Policy no-referrer',
+      pane.status === 200 && pane.headers['referrer-policy'] === 'no-referrer',
+      String(pane.headers['referrer-policy'])
+    );
+    const sameOriginNoReferer = await rawRequest(uiPort, 'POST', '/api/v2/infrastructure', {
+      Cookie: cookie,
+      'Content-Type': 'application/json',
+      Origin: 'http://127.0.0.1:' + uiPort,
+    }, JSON.stringify({ ip: '203.0.113.11', name: 'fixture' }));
+    check(
+      'same-origin POST without Referer still succeeds',
+      sameOriginNoReferer.status === 200,
+      sameOriginNoReferer.status + ' ' + sameOriginNoReferer.body
+    );
 
     const crossOrigin = await new Promise((resolve) => {
       const sock = net.connect(uiPort, '127.0.0.1', () => {
@@ -422,6 +476,41 @@ function cookiePair(res) {
       missingOrigin.includes('403') && !missingOrigin.includes('101'),
       missingOrigin
     );
+    const upgradePaths = [
+      ['/api/v2/c2/beacon', 'beacon'],
+      ['/API/v2/c2/beacon', 'beacon case'],
+      ['/api/v2/c2/beacon/', 'beacon trailing slash'],
+      ['/api//v2//c2//beacon', 'beacon double slash'],
+      ['/socket.io/../api/v2/c2/beacon', 'beacon dot-segment'],
+      ['/api/v2/policies/sync', 'policy sync'],
+    ];
+    for (const [urlPath, label] of upgradePaths) {
+      const refused = await new Promise((resolve) => {
+        const sock = net.connect(uiPort, '127.0.0.1', () => {
+          sock.write(
+            'GET ' + urlPath + ' HTTP/1.1\r\n'
+            + 'Host: 127.0.0.1:' + uiPort + '\r\n'
+            + 'Upgrade: websocket\r\n'
+            + 'Connection: Upgrade\r\n'
+            + 'Origin: http://127.0.0.1:' + uiPort + '\r\n'
+            + 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+            + 'Sec-WebSocket-Version: 13\r\n'
+            + 'Cookie: ' + cookie + '\r\n'
+            + '\r\n'
+          );
+        });
+        let data = '';
+        const timer = setTimeout(() => { sock.destroy(); resolve(data); }, 2000);
+        sock.on('data', (chunk) => { data += chunk.toString('utf8'); });
+        sock.on('error', () => {});
+        sock.on('close', () => { clearTimeout(timer); resolve(data); });
+      });
+      check(
+        'upgrade of ' + label + ' is refused',
+        refused.includes('403') && !refused.includes('101'),
+        refused
+      );
+    }
 
     const live = await new Promise((resolve) => {
       const socket = io('http://127.0.0.1:' + uiPort, {
@@ -679,6 +768,41 @@ function cookiePair(res) {
     );
   } finally {
     pruned.child.kill('SIGTERM');
+  }
+
+  const hardPort = await freePort();
+  const hard = spawnUi(hardPort, {
+    WATCHTOWER_UI_LOGIN_FAILURE_CAP: '2',
+    WATCHTOWER_TRUSTED_PROXY: '127.0.0.1',
+  });
+  try {
+    await hard.ready;
+    for (const ip of ['203.0.113.40', '203.0.113.41']) {
+      for (let i = 0; i < 5; i++) {
+        const miss = await rawRequest(hardPort, 'POST', '/login', {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': ip,
+        }, JSON.stringify({ key: 'z'.repeat(32) }));
+        check('hard-cap failure ' + ip + ' ' + (i + 1) + ' is 401', miss.status === 401, String(miss.status));
+      }
+      const lockedIp = await rawRequest(hardPort, 'POST', '/login', {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': ip,
+      }, JSON.stringify({ key: 'z'.repeat(32) }));
+      check('hard-cap address ' + ip + ' is locked', lockedIp.status === 429, lockedIp.body);
+    }
+    const fresh = await rawRequest(hardPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.42',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    check('a new bucket is refused when every slot is an active lock', fresh.status === 429, fresh.body);
+    const kept = await rawRequest(hardPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.40',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    check('a full map of active lockouts does not evict one', kept.status === 429, kept.body);
+  } finally {
+    hard.child.kill('SIGTERM');
   }
 
   const hugePort = await freePort();

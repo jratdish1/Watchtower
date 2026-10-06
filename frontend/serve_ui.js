@@ -22,7 +22,12 @@ const SESSION_MS = REQUESTED_SESSION_MS > 0
     ? Math.min(REQUESTED_SESSION_MS, MAX_TIMEOUT_MS)
     : 8 * 60 * 60 * 1000;
 const MAX_SESSIONS = 32;
-const LOGIN_FAILURE_CAP = 64;
+function loginFailureCap() {
+    const raw = Number(process.env.WATCHTOWER_UI_LOGIN_FAILURE_CAP);
+    if (!Number.isInteger(raw) || raw < 1) return 64;
+    return Math.min(raw, 64);
+}
+const LOGIN_FAILURE_CAP = loginFailureCap();
 const LOGO_PATH = path.join(__dirname, '../assets/watchtower_logo.png');
 const loginFailures = new Map();
 
@@ -192,6 +197,17 @@ function loginThrottled(ip) {
 function noteLoginFailure(ip) {
     const now = Date.now();
     pruneLoginFailures(now);
+    if (!loginFailures.has(ip) && loginFailures.size >= LOGIN_FAILURE_CAP) {
+        let freed = false;
+        for (const [key, row] of loginFailures) {
+            if (!(row.until > now)) {
+                loginFailures.delete(key);
+                freed = true;
+                break;
+            }
+        }
+        if (!freed) return false;
+    }
     const row = loginFailures.get(ip) || { count: 0, until: 0 };
     row.count += 1;
     if (row.count >= 5) {
@@ -201,6 +217,7 @@ function noteLoginFailure(ip) {
     loginFailures.delete(ip);
     loginFailures.set(ip, row);
     pruneLoginFailures(now);
+    return true;
 }
 
 function noteLoginSuccess(ip) {
@@ -276,7 +293,7 @@ app.post('/login', express.json({ limit: '8kb' }), (req, res) => {
     if (loginThrottled(ip)) return generic(res, 429);
     const provided = req.body && typeof req.body.key === 'string' ? req.body.key : req.headers['x-api-key'];
     if (!keysEqual(provided, apiKey)) {
-        noteLoginFailure(ip);
+        if (!noteLoginFailure(ip)) return generic(res, 429);
         console.warn('[UI Auth] Operator login failed.');
         return generic(res, 401);
     }
@@ -378,7 +395,7 @@ function proxyToApi(req, res) {
     const preq = http.request({
         hostname: apiHost,
         port: Number(apiPort),
-        path: normalized.path + normalized.query,
+        path: req.originalUrl || req.url,
         method: req.method,
         headers,
     }, (pres) => {
@@ -408,9 +425,15 @@ app.use((err, req, res, next) => {
 
 const server = http.createServer(app);
 
+function socketIoUpgradePath(urlPath) {
+    const normalized = normalizeProxyPath(urlPath);
+    return !!(normalized && (normalized.path === '/socket.io' || normalized.path.startsWith('/socket.io/')));
+}
+
 server.on('upgrade', (req, socket, head) => {
     try {
-        if (!req.url || req.url.indexOf('/socket.io/') !== 0) {
+        if (!socketIoUpgradePath(req.url)) {
+            socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
             socket.destroy();
             return;
         }
