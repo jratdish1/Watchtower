@@ -12,9 +12,9 @@
 | | SHA |
 |--|-----|
 | base (`main` at branch point) | `383964e7851330ebe3d66ad1eb0fd0371f9b984f` |
-| head | `HEAD_SHA_PLACEHOLDER` |
+| head (implementation commit, `git rev-parse HEAD` before this stamp) | `ee8fd38a1bc0bda3e37d13a1540f2d9a99841cd9` |
 
-`head` is the full `git rev-parse HEAD` of the commit that contains this receipt and the code under test. A git commit cannot be rewritten to embed its own id after the fact; the value above is filled with that commit's id once `git rev-parse HEAD` is known and this line is part of the commit that is the PR head. If a later stamp commit exists, the pull request description repeats `git rev-parse HEAD` and that value is authoritative.
+The implementation commit `ee8fd38a1bc0bda3e37d13a1540f2d9a99841cd9` is the tree the commands above ran against, plus this receipt with a placeholder head line. This stamp records that full id. The pull request description repeats `git rev-parse HEAD` of the branch tip after push; that tip is authoritative for the PR head. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
