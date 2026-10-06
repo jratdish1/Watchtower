@@ -1,6 +1,6 @@
 # Step 5 harness run — 2026-10-06
 
-**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC). Beacon and login close re-run: 2026-10-06 02:34 AM PDT (2026-10-06 09:34:17 UTC). Proxy-path close re-run: 2026-10-06 02:47 AM PDT (2026-10-06 09:47:55 UTC).
+**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC). Beacon and login close re-run: 2026-10-06 02:34 AM PDT (2026-10-06 09:34:17 UTC). Proxy-path close re-run: 2026-10-06 02:47 AM PDT (2026-10-06 09:47:55 UTC). Proxy-forward close re-run: 2026-10-06 03:05 AM PDT (2026-10-06 10:05:21 UTC).
 **Runner:** isolated CI/VM (this workspace). No live hosts.
 **Node:** `v22.14.0`
 **Paper:** `jratdish1/knowledge-base` `ops/vao-torch/tasks/VAO-TASK-20261002-STEP5-HARNESS-PAPER.md` (blob `0940f85c3d297b3ce9f9744e87795e3075d902ad`). `gh api repos/jratdish1/knowledge-base/contents/...` returned HTTP 404; the file was read through the authenticated contents API. Paper score at plant: 16 specified, 0 executed. This receipt is the run.
@@ -21,10 +21,12 @@
 | data-dir commit | `46dc8556fb28d8ca934113423f3faa72dd0e74af` |
 | prior tip (before beacon close) | `dd2148ad5c0bc9af4f18bbb52a0882c059cf2c26` |
 | beacon and login commit | `cfa58b0896ee012ec506392d1278c408ae16872b` |
-| prior tip (before this close) | `b12210c600e74eb90d98d6c6bd27724c3034998f` |
-| head (proxy-path commit) | `ac8352e0547f0144d35915bd079b6b4d08e8d61c` |
+| prior tip (before proxy-forward close) | `b12210c600e74eb90d98d6c6bd27724c3034998f` |
+| proxy-path commit | `ac8352e0547f0144d35915bd079b6b4d08e8d61c` |
+| prior tip (before this close) | `4437a89348bab276b51e36b66e841ed81ddd9d5e` |
+| head (proxy-forward commit) | `410915c0dfc098a0a79f481d2bc8dad7c85de45c` |
 
-`head` is `ac8352e0547f0144d35915bd079b6b4d08e8d61c`, the commit that allowlists browser proxy routes after path normalization, reserves `UPDATE_CORE` and `UPDATE_POLICY` for server paths, and rejects a placeholder key padded with whitespace. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
+`head` is `410915c0dfc098a0a79f481d2bc8dad7c85de45c`, the commit that uses path canonicalization only for the proxy allow/deny decision and forwards the original URL. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
@@ -33,16 +35,16 @@ Working directory for every command: repository root.
 | Command | Exit | Passed | Failed | Skipped |
 |---------|------|--------|--------|---------|
 | `node backend/test/allowlist.test.js` | 0 | 19 | 0 | 0 |
-| `node backend/test/auth.test.js` | 0 | 159 | 0 | 0 |
-| `node backend/test/c2-socket.test.js` | 0 | 16 | 0 | 0 |
+| `node backend/test/auth.test.js` | 0 | 165 | 0 | 0 |
+| `node backend/test/c2-socket.test.js` | 0 | 17 | 0 | 0 |
 | `node frontend/test/xss-static.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/csp-headers.test.js` | 0 | 34 | 0 | 0 |
-| `node frontend/test/ui-auth.test.js` | 0 | 129 | 0 | 0 |
+| `node frontend/test/ui-auth.test.js` | 0 | 154 | 0 | 0 |
 | `node frontend/test/step5-harness.test.js` | 0 | 62 | 0 | 0 |
 
 Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=62 failed=0 skipped=0`
 
-Combined checks: **430 passed, 0 failed, 0 skipped.** Auth is 159 (startup refusal, padded placeholders, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, beacon command delivered once, policy sync does not enroll, 253-character host cap, reserved host names, OTA signature required before apply, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 129. Step 5 is 62. Allowlist 19, socket 16, XSS 11.
+Combined checks: **462 passed, 0 failed, 0 skipped.** Auth is 165 (startup refusal, trimmed key length, padded placeholders, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, beacon command delivered once, policy sync does not enroll, 253-character host cap, reserved host names, OTA signature required before apply, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 154. Step 5 is 62. Allowlist 19, socket 17, XSS 11.
 
 ## Step 5 matrix (16)
 
@@ -220,8 +222,23 @@ P0 was 0. There was one new P1. No 2FA/TOTP and no audit log were added. The `0.
 | Item | Status | What changed |
 |------|--------|----------------|
 | P1 proxy agent-route 403 fails open | fixed | The proxy normalizes the path (one percent-decode, lowercase, collapsed slashes, no dot segments, no trailing slash) and forwards only an allowlist under `/api/v2`: infrastructure, topology, OTA upload, and policy update. Every other `/api/v2` path is 403, including case, trailing-slash, double-slash, percent-encoded, and dot-segment forms. State-changing proxy requests still require a matching Origin. Those probes leave the beacon queue intact. |
-| P2 socket `c2_command` accepts internal verbs | fixed | The socket accepts only `quarantine`, `lock_dir`, `kill`, `disable_user`, and `rollback`. `UPDATE_CORE` and `UPDATE_POLICY` stay on the server OTA and policy paths. `watchtower_beacon.py` refuses to apply an update when the HMAC is missing or does not match the payload. |
+| P2 socket `c2_command` accepts internal verbs | fixed | The socket accepts only `quarantine`, `lock_dir`, `kill`, and `disable_user`. `rollback` is not a socket verb. `UPDATE_CORE` and `UPDATE_POLICY` stay on the server OTA and policy paths. `watchtower_beacon.py` refuses to apply an update when the HMAC is missing or does not match the payload. |
 | P2 padded placeholder key | fixed | `operatorKeyProblem`, `operator_key.py`, and the AD sensor compare the trimmed value to the placeholder list. A non-placeholder key is stored as given. The socket handshake rejects a token whose trimmed form is a placeholder. |
 | P2 failure-map cap evicts active lockouts | fixed | Finished backoff rows are dropped first. Further eviction removes the oldest inactive rows only. An active lock stays when the map is over 64. |
 | P2 `GET /` malformed cookie is 400 | fixed | `GET /` redirects to `/login`. Duplicate `wt_session` cookies are kept only when every value is identical; otherwise the session is absent. |
 | P2 prototype host names return 500 | fixed | Host maps use `Object.create(null)`. `__proto__`, `constructor`, `prototype`, and `toString` are 400 and are not stored. |
+
+Forwarding the canonical path broke Socket.IO polling. That, and the items below, are closed in `410915c0dfc098a0a79f481d2bc8dad7c85de45c`.
+
+## Independent review close (tip 4437a89 NOT_GRADE_A)
+
+P0 was 0. The prior proxy-bypass P1 stayed fixed. One new P1 came from forwarding the canonical path. No 2FA/TOTP and no audit log were added. The `0.0.0.0` bind, the beacon port, and delivery ack were left as they are.
+
+| Item | Status | What changed |
+|------|--------|----------------|
+| P1 canonical path is forwarded | fixed | Allow and deny still use the normalized path. The proxy and the WebSocket upgrade forward the original path and query, so `/socket.io/?EIO=4&transport=polling` keeps its trailing slash. A default-transport client polls, upgrades, and receives `sync_state`. `/api/alerts%20` is forwarded encoded and is 404, not 500. Agent-route variants stay 403 and leave the queue intact. |
+| P2 upgrade path | fixed | An upgrade is allowed only when the canonical path is `/socket.io` or `/socket.io/…`. Beacon and policy-sync upgrade variants, including case, slash, and dot-segment forms, are 403 and not 101. The raw URL is forwarded when the upgrade is allowed. |
+| P2 trimmed key length | fixed | `operatorKeyProblem` measures `key.trim().length`. A 31-character key plus two spaces is refused by Node and by `operator_key.py`. The AD sensor already measures `$ApiKeyTrimmed.Length`. A non-placeholder key is still returned raw. |
+| P2 `Origin: null` | fixed | `Origin: null` stays 403 on a state-changing proxy POST. The Glass Pane sets `Referrer-Policy: no-referrer`. A same-origin POST that sends `Origin` and no Referer still succeeds. |
+| P2 soft failure-map cap | fixed | When every slot is an active lock, a new address is 429 and no bucket is added. Active lockouts are not evicted. Inactive rows are still dropped first to make room. |
+| Review: socket `rollback` | fixed | `rollback` is not in the socket command set. The agents do not execute it, so the socket rejects it and does not queue it. |
