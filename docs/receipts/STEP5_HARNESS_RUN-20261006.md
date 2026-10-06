@@ -1,6 +1,6 @@
 # Step 5 harness run — 2026-10-06
 
-**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC). Beacon and login close re-run: 2026-10-06 02:34 AM PDT (2026-10-06 09:34:17 UTC). Proxy-path close re-run: 2026-10-06 02:47 AM PDT (2026-10-06 09:47:55 UTC). Proxy-forward close re-run: 2026-10-06 03:05 AM PDT (2026-10-06 10:05:21 UTC).
+**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC). Beacon and login close re-run: 2026-10-06 02:34 AM PDT (2026-10-06 09:34:17 UTC). Proxy-path close re-run: 2026-10-06 02:47 AM PDT (2026-10-06 09:47:55 UTC). Proxy-forward close re-run: 2026-10-06 03:05 AM PDT (2026-10-06 10:05:21 UTC). Canonical-target close re-run: 2026-10-06 03:24 AM PDT (2026-10-06 10:24:37 UTC).
 **Runner:** isolated CI/VM (this workspace). No live hosts.
 **Node:** `v22.14.0`
 **Paper:** `jratdish1/knowledge-base` `ops/vao-torch/tasks/VAO-TASK-20261002-STEP5-HARNESS-PAPER.md` (blob `0940f85c3d297b3ce9f9744e87795e3075d902ad`). `gh api repos/jratdish1/knowledge-base/contents/...` returned HTTP 404; the file was read through the authenticated contents API. Paper score at plant: 16 specified, 0 executed. This receipt is the run.
@@ -23,10 +23,12 @@
 | beacon and login commit | `cfa58b0896ee012ec506392d1278c408ae16872b` |
 | prior tip (before proxy-forward close) | `b12210c600e74eb90d98d6c6bd27724c3034998f` |
 | proxy-path commit | `ac8352e0547f0144d35915bd079b6b4d08e8d61c` |
-| prior tip (before this close) | `4437a89348bab276b51e36b66e841ed81ddd9d5e` |
-| head (proxy-forward commit) | `410915c0dfc098a0a79f481d2bc8dad7c85de45c` |
+| prior tip (before proxy-forward functional close) | `4437a89348bab276b51e36b66e841ed81ddd9d5e` |
+| proxy-forward commit | `410915c0dfc098a0a79f481d2bc8dad7c85de45c` |
+| prior tip (before this close) | `465e9678d43ce1ad4d582a2e6f98b420cdb8fd4a` |
+| head (canonical-target commit) | `3a271f78f286f75f64d6e994a2384cb879d6f852` |
 
-`head` is `410915c0dfc098a0a79f481d2bc8dad7c85de45c`, the commit that uses path canonicalization only for the proxy allow/deny decision and forwards the original URL. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
+`head` is `3a271f78f286f75f64d6e994a2384cb879d6f852`, the commit that rejects a request target unless it is already canonical and forwards that same path and query. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
@@ -39,12 +41,12 @@ Working directory for every command: repository root.
 | `node backend/test/c2-socket.test.js` | 0 | 17 | 0 | 0 |
 | `node frontend/test/xss-static.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/csp-headers.test.js` | 0 | 34 | 0 | 0 |
-| `node frontend/test/ui-auth.test.js` | 0 | 154 | 0 | 0 |
+| `node frontend/test/ui-auth.test.js` | 0 | 213 | 0 | 0 |
 | `node frontend/test/step5-harness.test.js` | 0 | 62 | 0 | 0 |
 
 Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=62 failed=0 skipped=0`
 
-Combined checks: **462 passed, 0 failed, 0 skipped.** Auth is 165 (startup refusal, trimmed key length, padded placeholders, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, beacon command delivered once, policy sync does not enroll, 253-character host cap, reserved host names, OTA signature required before apply, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 154. Step 5 is 62. Allowlist 19, socket 17, XSS 11.
+Combined checks: **521 passed, 0 failed, 0 skipped.** Auth is 165 (startup refusal, trimmed key length, padded placeholders, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, beacon command delivered once, policy sync does not enroll, 253-character host cap, reserved host names, OTA signature required before apply, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 213. Step 5 is 62. Allowlist 19, socket 17, XSS 11.
 
 ## Step 5 matrix (16)
 
@@ -144,7 +146,7 @@ Not paper rows. Same VM, same node, exit 0:
 - `GET /api/alerts`, `GET /api/agents`, and `GET /api/memory/search`: missing, wrong, and prefix keys return 401. Alerts and agents with the test key return 200. Memory search with that key and no `q` returns 400. With `q` and no index script, the response is 503 `index unavailable` and has no script output. Compare is `crypto.timingSafeEqual` over equal-length buffers (`backend/auth.js`). The server does not start when the key is unset, empty, a built-in placeholder, or shorter than 32 characters.
 - `DELETE /api/v2/infrastructure` and `DELETE /api/v2/topology`: 403 `allowlist_purge_denied` / `DENY_PURGE_WITHOUT_CAP` without the purge capability (files left in place); 200 when the operator profile lists `purge`.
 - Socket `c2_command`: non-string `action`, null command, and array action emit `invalid_c2_action` and the process stays up. `quarantine` without the cap emits `allowlist_purge_denied`.
-- `serve_ui.js` responses: CSP (`default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `connect-src 'self'`, pinned socket.io script, per-response nonce), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
+- `serve_ui.js` responses: CSP (`default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `connect-src 'self'`, pinned socket.io script, per-response nonce), `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`.
 
 ## CSP allowances (unavoidable)
 
@@ -242,3 +244,16 @@ P0 was 0. The prior proxy-bypass P1 stayed fixed. One new P1 came from forwardin
 | P2 `Origin: null` | fixed | `Origin: null` stays 403 on a state-changing proxy POST. The Glass Pane sets `Referrer-Policy: no-referrer`. A same-origin POST that sends `Origin` and no Referer still succeeds. |
 | P2 soft failure-map cap | fixed | When every slot is an active lock, a new address is 429 and no bucket is added. Active lockouts are not evicted. Inactive rows are still dropped first to make room. |
 | Review: socket `rollback` | fixed | `rollback` is not in the socket command set. The agents do not execute it, so the socket rejects it and does not queue it. |
+
+Forwarding the original URL after a normalized allow check let a fragment reach an agent route. That, and the items below, are closed in `3a271f78f286f75f64d6e994a2384cb879d6f852`.
+
+## Independent review close (tip 465e9678 NOT_A)
+
+P0 was 0. The trailing-slash forward, the upgrade allow check, `Origin: null`, and case preservation stayed fixed. One new P1 came from checking a normalized path and forwarding a different string. No 2FA/TOTP and no audit log were added. The `0.0.0.0` bind, the beacon port, and delivery ack were left as they are.
+
+| Item | Status | What changed |
+|------|--------|----------------|
+| P1 fragment allowlist bypass | fixed | The proxy parses the request target once, before Express sees it. A target that contains `#`, does not start with `/`, contains a backslash, NUL, or a control character, or whose path has an encoded slash (`%2f` / `%5c`), an encoded fragment (`%23`), an encoded dot (`%2e`), a raw dot-segment, or a duplicate slash is 400. The allowlist comparison lowercases a copy of that path. The proxy forwards that same path plus the original query, and does not forward `originalUrl`. The WebSocket upgrade uses the same parse. `#`, `%23`, backslash, `%2f`, dot-segment, and double-slash forms of beacon, policy sync, inventory ingest, and threat ingest are 400 on POST and on upgrade. Those probes do not reach the backend, and the beacon queue stays intact. `/socket.io/?EIO=4&transport=polling` still polls, upgrades, and receives `sync_state`. |
+| P2 logout redirects when the request fails | fixed | The Log out control assigns `/login` only when the logout response is ok. A failed response or a network error shows "Log out failed" and stays on the page. |
+| P2 lockout expiry clears the failure count | fixed | An expired lock keeps its failure count for 15 minutes. The next failure continues the backoff. Active locks are still not evicted, and a full map of active locks still answers 429. |
+| P2 `Referrer-Policy: no-referrer` | fixed | The Glass Pane sends `Referrer-Policy: strict-origin-when-cross-origin`. `Origin: null` stays 403 on a state-changing proxy POST, including when `Sec-Fetch-Site` is `same-origin`. A same-origin POST that sends `Origin` and no Referer still succeeds. |
