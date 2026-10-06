@@ -1481,7 +1481,12 @@
         bindClick('fe-open-infra', () => openInfraModal());
         bindClick('fe-pause-btn', () => toggleOperatorPause());
         bindClick('fe-logout-btn', () => {
-            fetch('/logout', { method: 'POST' }).finally(() => { location.assign('/login'); });
+            fetch('/logout', { method: 'POST' }).then((res) => {
+                if (res.ok) location.assign('/login');
+                else showToast('error', 'Log out failed');
+            }).catch(() => {
+                showToast('error', 'Log out failed');
+            });
         });
         bindClick('clear-filter-btn', () => clearDeviceFilter());
         bindClick('fe-close-inspector', () => closeModal());

@@ -28,6 +28,7 @@ function loginFailureCap() {
     return Math.min(raw, 64);
 }
 const LOGIN_FAILURE_CAP = loginFailureCap();
+const LOGIN_HISTORY_MS = 15 * 60 * 1000;
 const LOGO_PATH = path.join(__dirname, '../assets/watchtower_logo.png');
 const loginFailures = new Map();
 
@@ -175,7 +176,8 @@ function clientIp(req) {
 
 function pruneLoginFailures(now) {
     for (const [ip, row] of [...loginFailures]) {
-        if (row.until > 0 && row.until <= now) loginFailures.delete(ip);
+        const locked = row.until > now;
+        if (!locked && now - (row.seen || 0) > LOGIN_HISTORY_MS) loginFailures.delete(ip);
     }
     if (loginFailures.size <= LOGIN_FAILURE_CAP) return;
     const inactive = [];
@@ -208,8 +210,9 @@ function noteLoginFailure(ip) {
         }
         if (!freed) return false;
     }
-    const row = loginFailures.get(ip) || { count: 0, until: 0 };
+    const row = loginFailures.get(ip) || { count: 0, until: 0, seen: 0 };
     row.count += 1;
+    row.seen = now;
     if (row.count >= 5) {
         const delay = Math.min(60000, 1000 * Math.pow(2, row.count - 5));
         row.until = now + delay;
@@ -350,40 +353,37 @@ const BROWSER_V2 = new Set([
     '/api/v2/policies/update',
 ]);
 
-function normalizeProxyPath(urlPath) {
+function requestTarget(urlPath) {
     const raw = String(urlPath || '');
+    if (!raw.startsWith('/') || raw.includes('#') || raw.includes('\\') || /[\u0000-\u001F\u007F]/.test(raw)) return null;
     const q = raw.indexOf('?');
-    let pathname = q === -1 ? raw : raw.slice(0, q);
+    const pathname = q === -1 ? raw : raw.slice(0, q);
     const query = q === -1 ? '' : raw.slice(q);
-    if (pathname.includes('\\') || pathname.includes('\0')) return null;
-    let decoded;
-    try {
-        decoded = decodeURIComponent(pathname);
-    } catch (_) {
-        return null;
-    }
-    if (decoded.includes('%') || decoded.includes('\0') || decoded.includes('\\')) return null;
-    const parts = [];
-    decoded.toLowerCase().split('/').forEach((segment) => {
-        if (segment === '' || segment === '.') return;
-        if (segment === '..') {
-            parts.pop();
-            return;
+    if (pathname.includes('//') || /%(?:2f|5c|23|2e)/i.test(pathname)) return null;
+    const segments = pathname.split('/');
+    for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        if (i === 0) {
+            if (segment !== '') return null;
+            continue;
         }
-        parts.push(segment);
-    });
-    return { path: '/' + parts.join('/'), query };
+        if (segment === '') continue;
+        if (segment === '.' || segment === '..') return null;
+    }
+    return { pathname, query };
 }
 
 function proxyPathAllowed(pathname) {
-    if (pathname === '/socket.io' || pathname.startsWith('/socket.io/')) return true;
-    if (pathname === '/api/v2' || pathname.startsWith('/api/v2/')) return BROWSER_V2.has(pathname);
-    return pathname.startsWith('/api/');
+    const compared = pathname.toLowerCase();
+    if (compared === '/socket.io' || compared.startsWith('/socket.io/')) return true;
+    if (compared === '/api/v2' || compared.startsWith('/api/v2/')) return BROWSER_V2.has(compared);
+    return compared.startsWith('/api/');
 }
 
 function proxyToApi(req, res) {
-    const normalized = normalizeProxyPath(req.originalUrl || req.url);
-    if (!normalized || !proxyPathAllowed(normalized.path)) return generic(res, 403);
+    const target = req.checkedTarget;
+    if (!target) return generic(res, 400);
+    if (!proxyPathAllowed(target.pathname)) return generic(res, 403);
     const method = String(req.method || 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && !originAllowed(req)) {
         return generic(res, 403);
@@ -395,7 +395,7 @@ function proxyToApi(req, res) {
     const preq = http.request({
         hostname: apiHost,
         port: Number(apiPort),
-        path: req.originalUrl || req.url,
+        path: target.pathname + target.query,
         method: req.method,
         headers,
     }, (pres) => {
@@ -423,17 +423,40 @@ app.use((err, req, res, next) => {
     generic(res, status);
 });
 
-const server = http.createServer(app);
+function rejectNonCanonical(res) {
+    applySecurityHeaders(res, null);
+    const body = JSON.stringify({ error: 'Bad request' });
+    res.writeHead(400, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': Buffer.byteLength(body),
+    });
+    res.end(body);
+}
 
-function socketIoUpgradePath(urlPath) {
-    const normalized = normalizeProxyPath(urlPath);
-    return !!(normalized && (normalized.path === '/socket.io' || normalized.path.startsWith('/socket.io/')));
+const server = http.createServer((req, res) => {
+    const target = requestTarget(req.url);
+    if (!target) return rejectNonCanonical(res);
+    req.checkedTarget = target;
+    app(req, res);
+});
+
+function socketIoUpgradeTarget(urlPath) {
+    const target = requestTarget(urlPath);
+    if (!target) return { status: 400 };
+    const compared = target.pathname.toLowerCase();
+    if (compared === '/socket.io' || compared.startsWith('/socket.io/')) {
+        return { forward: target.pathname + target.query };
+    }
+    return { status: 403 };
 }
 
 server.on('upgrade', (req, socket, head) => {
     try {
-        if (!socketIoUpgradePath(req.url)) {
-            socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+        const upgradeTarget = socketIoUpgradeTarget(req.url);
+        if (!upgradeTarget.forward) {
+            const status = upgradeTarget.status === 400 ? 400 : 403;
+            const reason = status === 400 ? 'Bad Request' : 'Forbidden';
+            socket.write('HTTP/1.1 ' + status + ' ' + reason + '\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
             socket.destroy();
             return;
         }
@@ -458,7 +481,7 @@ server.on('upgrade', (req, socket, head) => {
         const preq = http.request({
             hostname: apiHost,
             port: Number(apiPort),
-            path: req.url,
+            path: upgradeTarget.forward,
             method: req.method || 'GET',
             headers,
         });

@@ -55,7 +55,7 @@ function securityHeaders(nonce) {
   return {
     'Content-Security-Policy': contentSecurityPolicy(nonce),
     'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
   };
 }
 

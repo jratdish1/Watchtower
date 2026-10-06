@@ -90,7 +90,7 @@ function get(port, urlPath, headers) {
 
   const headers = securityHeaders('abc');
   check('X-Content-Type-Options nosniff', headers['X-Content-Type-Options'] === 'nosniff');
-  check('Referrer-Policy no-referrer', headers['Referrer-Policy'] === 'no-referrer');
+  check('Referrer-Policy strict-origin-when-cross-origin', headers['Referrer-Policy'] === 'strict-origin-when-cross-origin');
 
   const port = await freePort();
   const uiEnv = Object.assign({}, process.env, {
@@ -157,7 +157,7 @@ function get(port, urlPath, headers) {
     check('response script-src pins socket.io', live['script-src'] && live['script-src'].includes(SOCKET_IO_SCRIPT));
     check('response script-src has no unsafe-inline', live['script-src'] && !live['script-src'].includes("'unsafe-inline'"));
     check('response X-Content-Type-Options nosniff', page.headers['x-content-type-options'] === 'nosniff');
-    check('response Referrer-Policy no-referrer', page.headers['referrer-policy'] === 'no-referrer');
+    check('response Referrer-Policy strict-origin-when-cross-origin', page.headers['referrer-policy'] === 'strict-origin-when-cross-origin');
 
     const scriptNonce = page.body.match(/<script nonce="([^"]+)">/);
     const styleNonce = page.body.match(/<style nonce="([^"]+)">/);

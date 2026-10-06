@@ -199,6 +199,10 @@ function cookiePair(res) {
       'Glass Pane has a logout control',
       html.body.includes('id="fe-logout-btn"') && html.body.includes("fetch('/logout'") && !/id="fe-logout-btn"[^>]*data-mutate/.test(html.body)
     );
+    check(
+      'logout redirects only after a successful response',
+      html.body.includes("if (res.ok) location.assign('/login')") && html.body.includes("showToast('error', 'Log out failed')") && !html.body.includes(".finally(() => { location.assign('/login')")
+    );
     const hidden = await rawRequest(port, 'GET', '/serve_ui.js', { Cookie: cookie });
     check('authenticated /serve_ui.js is not served', hidden.status === 404, String(hidden.status));
     const hiddenPkg = await rawRequest(port, 'GET', '/package.json', { Cookie: cookie });
@@ -410,10 +414,21 @@ function cookiePair(res) {
       Origin: 'null',
     }, JSON.stringify({ ip: '203.0.113.10', name: 'fixture' }));
     check('Origin null is forbidden on a state-changing proxy request', nullOrigin.status === 403 && nullOrigin.json && nullOrigin.json.error === 'Forbidden', nullOrigin.body);
+    const opaqueSite = await rawRequest(uiPort, 'POST', '/api/v2/infrastructure', {
+      Cookie: cookie,
+      'Content-Type': 'application/json',
+      Origin: 'null',
+      'Sec-Fetch-Site': 'same-origin',
+    }, JSON.stringify({ ip: '203.0.113.13', name: 'fixture' }));
+    check(
+      'Origin null stays forbidden when Sec-Fetch-Site is same-origin',
+      opaqueSite.status === 403 && opaqueSite.json && opaqueSite.json.error === 'Forbidden',
+      opaqueSite.body
+    );
     const pane = await rawRequest(uiPort, 'GET', '/watchtower.html', { Cookie: cookie });
     check(
-      'Glass Pane sets Referrer-Policy no-referrer',
-      pane.status === 200 && pane.headers['referrer-policy'] === 'no-referrer',
+      'Glass Pane sets Referrer-Policy strict-origin-when-cross-origin',
+      pane.status === 200 && pane.headers['referrer-policy'] === 'strict-origin-when-cross-origin',
       String(pane.headers['referrer-policy'])
     );
     const sameOriginNoReferer = await rawRequest(uiPort, 'POST', '/api/v2/infrastructure', {
@@ -426,6 +441,12 @@ function cookiePair(res) {
       sameOriginNoReferer.status === 200,
       sameOriginNoReferer.status + ' ' + sameOriginNoReferer.body
     );
+    const cased = await rawRequest(uiPort, 'POST', '/API/v2/infrastructure', {
+      Cookie: cookie,
+      'Content-Type': 'application/json',
+      Origin: 'http://127.0.0.1:' + uiPort,
+    }, JSON.stringify({ ip: '203.0.113.12', name: 'fixture' }));
+    check('case-variant allowlisted path is forwarded as received', cased.status === 200, cased.status + ' ' + cased.body);
 
     const crossOrigin = await new Promise((resolve) => {
       const sock = net.connect(uiPort, '127.0.0.1', () => {
@@ -477,14 +498,14 @@ function cookiePair(res) {
       missingOrigin
     );
     const upgradePaths = [
-      ['/api/v2/c2/beacon', 'beacon'],
-      ['/API/v2/c2/beacon', 'beacon case'],
-      ['/api/v2/c2/beacon/', 'beacon trailing slash'],
-      ['/api//v2//c2//beacon', 'beacon double slash'],
-      ['/socket.io/../api/v2/c2/beacon', 'beacon dot-segment'],
-      ['/api/v2/policies/sync', 'policy sync'],
+      ['/api/v2/c2/beacon', 'beacon', '403'],
+      ['/API/v2/c2/beacon', 'beacon case', '403'],
+      ['/api/v2/c2/beacon/', 'beacon trailing slash', '403'],
+      ['/api//v2//c2//beacon', 'beacon double slash', '400'],
+      ['/socket.io/../api/v2/c2/beacon', 'beacon dot-segment', '400'],
+      ['/api/v2/policies/sync', 'policy sync', '403'],
     ];
-    for (const [urlPath, label] of upgradePaths) {
+    for (const [urlPath, label, status] of upgradePaths) {
       const refused = await new Promise((resolve) => {
         const sock = net.connect(uiPort, '127.0.0.1', () => {
           sock.write(
@@ -507,7 +528,7 @@ function cookiePair(res) {
       });
       check(
         'upgrade of ' + label + ' is refused',
-        refused.includes('403') && !refused.includes('101'),
+        refused.includes(status) && !refused.includes('101'),
         refused
       );
     }
@@ -583,24 +604,80 @@ function cookiePair(res) {
     }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
     const variantCookie = cookiePair(variantSession).split(';')[0];
     const variants = [
-      ['/api/v2/c2/beacon/', 'trailing slash'],
-      ['/API/v2/c2/beacon', 'uppercase'],
-      ['/api/V2/C2/BEACON', 'mixed case'],
-      ['/api//v2//c2//beacon', 'double slash'],
-      ['/api/v2/c2/%62eacon', 'percent-encoded'],
-      ['/api/foo/../v2/c2/beacon', 'dot-segment'],
-      ['/api/v2/policies/sync/', 'policy sync trailing slash'],
+      ['/api/v2/c2/beacon/', 'trailing slash', 403],
+      ['/API/v2/c2/beacon', 'uppercase', 403],
+      ['/api/V2/C2/BEACON', 'mixed case', 403],
+      ['/api//v2//c2//beacon', 'double slash', 400],
+      ['/api/v2/c2/%62eacon', 'percent-encoded', 403],
+      ['/api/foo/../v2/c2/beacon', 'dot-segment', 400],
+      ['/api/v2/policies/sync/', 'policy sync trailing slash', 403],
     ];
-    for (const [urlPath, label] of variants) {
+    for (const [urlPath, label, status] of variants) {
       const blocked = await rawRequest(variantUiPort, 'GET', urlPath + '?host=ops-1', {
         Cookie: variantCookie,
         Origin: 'http://127.0.0.1:9',
       });
+      const error = status === 400 ? 'Bad request' : 'Forbidden';
       check(
         'proxy ' + label + ' is forbidden',
-        blocked.status === 403 && blocked.json && blocked.json.error === 'Forbidden',
+        blocked.status === status && blocked.json && blocked.json.error === error,
         blocked.status + ' ' + blocked.body
       );
+    }
+    const agentRoutes = [
+      '/api/v2/c2/beacon',
+      '/api/v2/policies/sync',
+      '/api/v2/ingest/inventory',
+      '/api/v2/ingest/threat',
+    ];
+    function nonCanonical(base) {
+      return [
+        [base + '#/../../infrastructure', 'hash'],
+        [base + '%23/../../infrastructure', 'encoded hash'],
+        [base.replace('/api/', '/api\\'), 'backslash'],
+        [base.replace('/v2/', '/v2%2f'), 'encoded slash'],
+        [base.replace('/v2/', '/v2/../v2/'), 'dot-segment'],
+        [base.replace('/v2/', '//v2/'), 'double slash'],
+      ];
+    }
+    for (const base of agentRoutes) {
+      for (const [urlPath, label] of nonCanonical(base)) {
+        const blocked = await rawRequest(variantUiPort, 'POST', urlPath, {
+          Cookie: variantCookie,
+          Origin: 'http://127.0.0.1:' + variantUiPort,
+          'Content-Type': 'application/json',
+        }, '{}');
+        check(
+          'POST ' + base + ' ' + label + ' is rejected',
+          blocked.status === 400 && blocked.json && blocked.json.error === 'Bad request',
+          blocked.status + ' ' + blocked.body
+        );
+        const upgraded = await new Promise((resolve) => {
+          const sock = net.connect(variantUiPort, '127.0.0.1', () => {
+            sock.write(
+              'GET ' + urlPath + ' HTTP/1.1\r\n'
+              + 'Host: 127.0.0.1:' + variantUiPort + '\r\n'
+              + 'Upgrade: websocket\r\n'
+              + 'Connection: Upgrade\r\n'
+              + 'Origin: http://127.0.0.1:' + variantUiPort + '\r\n'
+              + 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+              + 'Sec-WebSocket-Version: 13\r\n'
+              + 'Cookie: ' + variantCookie + '\r\n'
+              + '\r\n'
+            );
+          });
+          let data = '';
+          const timer = setTimeout(() => { sock.destroy(); resolve(data); }, 1500);
+          sock.on('data', (chunk) => { data += chunk.toString('utf8'); });
+          sock.on('error', () => {});
+          sock.on('close', () => { clearTimeout(timer); resolve(data); });
+        });
+        check(
+          'upgrade ' + base + ' ' + label + ' is rejected',
+          upgraded.includes('400') && !upgraded.includes('101'),
+          upgraded
+        );
+      }
     }
     const posted = await rawRequest(variantUiPort, 'POST', '/api/v2/c2/beacon/?host=ops-1', {
       Cookie: variantCookie,
@@ -803,6 +880,33 @@ function cookiePair(res) {
     check('a full map of active lockouts does not evict one', kept.status === 429, kept.body);
   } finally {
     hard.child.kill('SIGTERM');
+  }
+
+  const againPort = await freePort();
+  const again = spawnUi(againPort);
+  try {
+    await again.ready;
+    for (let i = 0; i < 5; i++) {
+      const miss = await rawRequest(againPort, 'POST', '/login', {
+        'Content-Type': 'application/json',
+      }, JSON.stringify({ key: 'z'.repeat(32) }));
+      check('backoff failure ' + (i + 1) + ' is 401', miss.status === 401, String(miss.status));
+    }
+    const firstLock = await rawRequest(againPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    check('first lockout is 429', firstLock.status === 429, firstLock.body);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const afterExpiry = await rawRequest(againPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    check('a failure after expiry is counted again', afterExpiry.status === 401, afterExpiry.body);
+    const escalated = await rawRequest(againPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    check('expiry keeps the failure history and escalates the next lock', escalated.status === 429, escalated.body);
+  } finally {
+    again.child.kill('SIGTERM');
   }
 
   const hugePort = await freePort();
