@@ -475,6 +475,14 @@ function auth(key) {
       maxJoin.status === 200 && enrollDb().deviceGroups && enrollDb().deviceGroups[maxHost] === 'Default',
       String(maxJoin.status)
     );
+    const paddedHost = await request(enrollApi.port, 'POST', '/api/v2/c2/beacon?host=' + encodeURIComponent(' short-host '), Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), '{}');
+    check(
+      'POST beacon rejects a padded host',
+      paddedHost.status === 400 && !Object.prototype.hasOwnProperty.call(enrollDb().deviceGroups || {}, ' short-host ') && enrollDb().deviceGroups['short-host'] === 'Default',
+      String(paddedHost.status) + ' ' + paddedHost.body + ' ' + JSON.stringify(enrollDb().deviceGroups)
+    );
     for (const reserved of ['__proto__', 'constructor', 'toString']) {
       const blocked = await request(enrollApi.port, 'POST', '/api/v2/c2/beacon?host=' + reserved, Object.assign({
         'Content-Type': 'application/json',

@@ -159,6 +159,32 @@ function once(socket, event) {
       JSON.stringify(rollback)
     );
 
+    const lookalike = 'qu\u0430rantine';
+    const inexact = [
+      [' quarantine ', 'padded'],
+      ['Quarantine', 'mixed-case'],
+      ['KILL', 'uppercase'],
+      [lookalike, 'unicode-lookalike'],
+    ];
+    for (const [action, label] of inexact) {
+      const wait = once(socket, 'c2_result');
+      socket.emit('c2_command', { action, target: '/tmp/x', host: 'ops-1' });
+      const payload = await wait;
+      check(
+        label + ' action is rejected exactly',
+        payload && payload.ok === false && payload.error === 'invalid_c2_action' && !payload.allowlist_denied,
+        JSON.stringify(payload)
+      );
+    }
+    const paddedHostWait = once(socket, 'c2_result');
+    socket.emit('c2_command', { action: 'quarantine', target: '/tmp/x', host: ' ops-1 ' });
+    const paddedHost = await paddedHostWait;
+    check(
+      'padded host is rejected exactly',
+      paddedHost && paddedHost.ok === false && paddedHost.error === 'invalid_c2_action' && !paddedHost.allowlist_denied,
+      JSON.stringify(paddedHost)
+    );
+
     for (const action of ['UPDATE_CORE', 'UPDATE_POLICY']) {
       const reservedWait = once(socket, 'c2_result');
       socket.emit('c2_command', { action, target: 'http://evil.example/update_core.zip', host: 'ops-1', hmac: 'abc' });

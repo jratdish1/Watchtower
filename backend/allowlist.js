@@ -393,12 +393,11 @@ function profileHasCapability(cap, profileId) {
  */
 function isPurgeOrDestructiveAction(action) {
   if (typeof action !== 'string' || action.length === 0) return false;
-  const a = action.toLowerCase();
   const cfg = loadConfig();
   const list = (cfg.c2 && cfg.c2.destructive_actions) || [];
-  if (list.some((x) => String(x).toLowerCase() === a)) return true;
-  return a === 'purge' || a.startsWith('purge_') || a === 'wipe' || a === 'destroy' || a === 'clear'
-    || a === 'quarantine' || a === 'disable_user';
+  if (list.some((x) => x === action)) return true;
+  return action === 'purge' || action.startsWith('purge_') || action === 'wipe' || action === 'destroy' || action === 'clear'
+    || action === 'quarantine' || action === 'disable_user';
 }
 
 /**
@@ -426,11 +425,11 @@ function assertC2Command(cmd, deviceGroups, groupDB, profileId) {
   const { group } = resolveHostGroup(cmd.host, deviceGroups);
   const policy = (groupDB && groupDB[group]) || {};
   const cfg = loadConfig();
-  const action = typeof cmd.action === 'string' ? cmd.action.toLowerCase() : '';
+  const action = typeof cmd.action === 'string' ? cmd.action : '';
 
   if (policy.WATCHTOWER_AUDIT_MODE === true) {
     const blocked = (cfg.c2 && cfg.c2.audit_blocked_actions) || ['kill'];
-    if (blocked.map((a) => String(a).toLowerCase()).includes(action)) {
+    if (blocked.includes(action)) {
       return makeDeny('DENY_C2_ACTION_NOT_ALLOWED', {
         action,
         reason: 'WATCHTOWER_AUDIT_MODE',

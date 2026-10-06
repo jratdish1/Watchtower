@@ -103,15 +103,18 @@ function takeCommands(host) {
     return commands;
 }
 
-const RESERVED_HOSTS = new Set(['__proto__', 'constructor', 'prototype', 'tostring']);
+const RESERVED_HOSTS = new Set(['__proto__', 'constructor', 'prototype', 'toString']);
+
+function exactHost(value) {
+    if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) return null;
+    if (value.length > MAX_HOST_NAME || RESERVED_HOSTS.has(value)) return null;
+    return value;
+}
 
 function parseHost(value) {
-    if (typeof value !== 'string') return { status: 400, error: 'Host parameter required' };
-    const host = value.trim();
-    if (!host) return { status: 400, error: 'Host parameter required' };
-    if (host.length > MAX_HOST_NAME || RESERVED_HOSTS.has(host.toLowerCase())) {
-        return { status: 400, error: 'Bad request' };
-    }
+    if (typeof value !== 'string' || value.length === 0) return { status: 400, error: 'Host parameter required' };
+    const host = exactHost(value);
+    if (!host) return { status: 400, error: 'Bad request' };
     return { host };
 }
 
@@ -119,7 +122,7 @@ function nullHostMap(source) {
     const map = Object.create(null);
     if (!source || typeof source !== 'object') return map;
     Object.keys(source).forEach((key) => {
-        if (RESERVED_HOSTS.has(String(key).toLowerCase())) return;
+        if (RESERVED_HOSTS.has(String(key))) return;
         map[key] = source[key];
     });
     return map;
@@ -229,10 +232,11 @@ io.on('connection', (socket) => {
     
     socket.on('c2_command', (cmd) => {
     const actionName = cmd && typeof cmd === 'object' && !Array.isArray(cmd) && typeof cmd.action === 'string'
-        ? cmd.action.trim().toLowerCase()
+        ? cmd.action
         : '';
     const operatorAction = OPERATOR_SOCKET_ACTIONS.has(actionName) && !RESERVED_QUEUE_ACTIONS.has(actionName);
-    if (!cmd || typeof cmd !== 'object' || Array.isArray(cmd) || !operatorAction) {
+    const hostName = cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? exactHost(cmd.host) : null;
+    if (!cmd || typeof cmd !== 'object' || Array.isArray(cmd) || !operatorAction || !hostName) {
         socket.emit('c2_result', {
             ok: false,
             error: 'invalid_c2_action',
@@ -240,17 +244,6 @@ io.on('connection', (socket) => {
             action: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.action : undefined,
             target: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.target : undefined,
             host: cmd && typeof cmd === 'object' && !Array.isArray(cmd) ? cmd.host : undefined
-        });
-        return;
-    }
-    if (typeof cmd.host === 'string' && RESERVED_HOSTS.has(cmd.host.trim().toLowerCase())) {
-        socket.emit('c2_result', {
-            ok: false,
-            error: 'invalid_c2_action',
-            rule: 'INVALID_C2_ACTION',
-            action: cmd.action,
-            target: cmd.target,
-            host: cmd.host
         });
         return;
     }
@@ -458,7 +451,7 @@ app.post('/api/v2/ingest/fim', authenticate, (req, res) => {
 
 app.post('/api/v2/ingest/inventory', authenticate, (req, res) => {
     const payload = req.body;
-    const host = payload.source;
+    const host = exactHost(payload.source);
     if (!host) return res.status(400).json({error: "Missing source"});
     
     globalInventory[host] = payload.inventory;
@@ -503,27 +496,29 @@ app.get('/api/v2/policies/sync', authenticate, (req, res) => {
 
 app.post('/api/v2/policies/update', authenticate, (req, res) => {
     const { group, policy, host, newGroup } = req.body;
+    let exactPolicyHost = null;
     if (typeof host === 'string' && host !== '') {
         const parsedHost = parseHost(host);
         if (parsedHost.error) return res.status(parsedHost.status).json({ error: parsedHost.error });
+        exactPolicyHost = parsedHost.host;
     }
 
     // Allowlist adapter (CALL A). WATCHTOWER_ALLOWLIST=0 does not skip this.
-    if (host && newGroup) {
-        const deny = allowlist.assertReassign(host, newGroup, deviceGroupMap);
+    if (exactPolicyHost && newGroup) {
+        const deny = allowlist.assertReassign(exactPolicyHost, newGroup, deviceGroupMap);
         if (allowlist.sendHttpDeny(res, deny)) return;
     } else if (group && policy) {
         const deny = allowlist.assertPolicyGroupWrite(group, groupDB);
         if (allowlist.sendHttpDeny(res, deny)) return;
     }
     
-    if (host && newGroup) {
+    if (exactPolicyHost && newGroup) {
         if (!groupDB[newGroup]) groupDB[newGroup] = {...groupDB["Default"]};
-        deviceGroupMap[host] = newGroup;
+        deviceGroupMap[exactPolicyHost] = newGroup;
         saveDB();
         
-        enqueueCommand(host, { action: 'UPDATE_POLICY', target: 'Refresh' });
-        console.log(`[POLICY] Assigned ${host} to Group '${newGroup}'`);
+        enqueueCommand(exactPolicyHost, { action: 'UPDATE_POLICY', target: 'Refresh' });
+        console.log(`[POLICY] Assigned ${exactPolicyHost} to Group '${newGroup}'`);
         
     } else if (group && policy) {
         groupDB[group] = policy;
@@ -598,7 +593,7 @@ app.post('/api/v2/ingest/threat', authenticate, (req, res) => {
     
     // TIER 1: AUTONOMOUS REMEDIATION (THE BRAIN)
     if (process.env.AUTO_REMEDIATE === 'true' && (enrichedPayload.ai_verdict === 'MALICIOUS' || (enrichedPayload.severity === 'high' && enrichedPayload.event_type?.includes('AD_SECURITY_EVENT')))) {
-        const host = enrichedPayload.source;
+        const host = exactHost(enrichedPayload.source);
         // Attempt to extract target from title/filepath, fallback to unknown
         const target = enrichedPayload.file_path || "UnknownTarget"; 
         
