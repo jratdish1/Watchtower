@@ -13,9 +13,9 @@
 |--|-----|
 | base (`main` at branch point) | `383964e7851330ebe3d66ad1eb0fd0371f9b984f` |
 | prior tip (before memory-search auth) | `961f93088464db81f5b913b9c0a6e64c8b779703` |
-| head (memory-search auth commit) | `HEAD_SHA_PLACEHOLDER` |
+| head (memory-search auth commit) | `b2198712693630ced6674150aeb60b5819a39a6c` |
 
-`head` is the commit that removes the `GET /api/memory/search` bypass and records these totals. The pull request description repeats `git rev-parse HEAD` after push. A commit object cannot contain its own id, so if the branch tip is a child of `head`, that child only stamps this hash.
+`head` is `b2198712693630ced6674150aeb60b5819a39a6c`, the commit that removes the `GET /api/memory/search` bypass. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
