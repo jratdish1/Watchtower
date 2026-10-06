@@ -1,6 +1,6 @@
 # Step 5 harness run — 2026-10-06
 
-**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC).
+**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC).
 **Runner:** isolated CI/VM (this workspace). No live hosts.
 **Node:** `v22.14.0`
 **Paper:** `jratdish1/knowledge-base` `ops/vao-torch/tasks/VAO-TASK-20261002-STEP5-HARNESS-PAPER.md` (blob `0940f85c3d297b3ce9f9744e87795e3075d902ad`). `gh api repos/jratdish1/knowledge-base/contents/...` returned HTTP 404; the file was read through the authenticated contents API. Paper score at plant: 16 specified, 0 executed. This receipt is the run.
@@ -15,10 +15,12 @@
 | prior tip (before operator-key close) | `8ca0cd8e99bae5d1d9335a02115701279ba00340` |
 | memory-search auth commit | `b2198712693630ced6674150aeb60b5819a39a6c` |
 | operator-key auth commit | `9e25b7a1c6596a7ff12b101c032ada6bc882aa84` |
-| prior tip (before this close) | `113287d3800dbbdcee4deed9895e01dc28a9f995` |
-| head (cookie and template-key commit) | `f0cde0ba2804833220c85eadf04f44bac66bf507` |
+| prior tip (before cookie close) | `113287d3800dbbdcee4deed9895e01dc28a9f995` |
+| cookie and template-key commit | `f0cde0ba2804833220c85eadf04f44bac66bf507` |
+| prior tip (before this close) | `af3a9aa12de9875f6d1fe13857de609d1bce5754` |
+| head (data-dir commit) | `46dc8556fb28d8ca934113423f3faa72dd0e74af` |
 
-`head` is `f0cde0ba2804833220c85eadf04f44bac66bf507`, the commit that rejects a malformed session cookie, rejects example-file key literals, and keeps tests off the repo data directory. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
+`head` is `46dc8556fb28d8ca934113423f3faa72dd0e74af`, the commit that resolves `WATCHTOWER_DATA_DIR` from the repository root and stops a beacon GET from emptying the queue. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
@@ -27,16 +29,16 @@ Working directory for every command: repository root.
 | Command | Exit | Passed | Failed | Skipped |
 |---------|------|--------|--------|---------|
 | `node backend/test/allowlist.test.js` | 0 | 19 | 0 | 0 |
-| `node backend/test/auth.test.js` | 0 | 123 | 0 | 0 |
+| `node backend/test/auth.test.js` | 0 | 138 | 0 | 0 |
 | `node backend/test/c2-socket.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/xss-static.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/csp-headers.test.js` | 0 | 34 | 0 | 0 |
-| `node frontend/test/ui-auth.test.js` | 0 | 68 | 0 | 0 |
+| `node frontend/test/ui-auth.test.js` | 0 | 83 | 0 | 0 |
 | `node frontend/test/step5-harness.test.js` | 0 | 62 | 0 | 0 |
 
 Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=62 failed=0 skipped=0`
 
-Combined checks: **328 passed, 0 failed, 0 skipped.** Auth is 123 (startup refusal, example-file key literals, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, OTA public base, core fail-start, repo data files unchanged). CSP is 34 (session plus distinct nonces). `ui-auth.test.js` is 68. Step 5 is 62. Allowlist 19, socket 11, XSS 11.
+Combined checks: **358 passed, 0 failed, 0 skipped.** Auth is 138 (startup refusal, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, read-only beacon GET, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 83. Step 5 is 62. Allowlist 19, socket 11, XSS 11.
 
 ## Step 5 matrix (16)
 
@@ -172,4 +174,22 @@ Each item below is fixed in `f0cde0ba2804833220c85eadf04f44bac66bf507`. None are
 | Harness checks that were hard-coded true | fixed | `getElementById` returns null unless the id is in `watchtower.html`. Mesh keyup hides a non-matching `.mesh-node`. OTA change writes the selected file name into the label. |
 | Core client public key fallback | fixed | Hub clients call `core/operator_key.py` and exit 1 when the key is unset, empty, a public placeholder, or shorter than 32 characters. `watchtower_beacon.py` without a key exits 1. The AD sensor script does the same. |
 
-`GET /login` remains the operator key form. It contains no key and no fleet data. `GET /` redirects there when the cookie is absent. Other UI routes return 401 without a session, or 400 when the cookie header cannot be decoded.
+`GET /login` remains the operator key form. It contains no key and no fleet data. `GET /` redirects there when the cookie is absent. At `f0cde0b`, any malformed cookie returned 400. `46dc8556fb28d8ca934113423f3faa72dd0e74af` limits that to `wt_session`, recorded below.
+
+## Independent review close (tip af3a9aa NOT_GRADE_A)
+
+Each item below is fixed in `46dc8556fb28d8ca934113423f3faa72dd0e74af`. No 2FA/TOTP and no audit log were added.
+
+| Item | Status | What changed |
+|------|--------|----------------|
+| P1 `WATCHTOWER_DATA_DIR` follows cwd | fixed | Relative values resolve with `path.resolve(__dirname, '..', value)`. Starting from `backend/` with `./data` uses repo-root `data/` and does not create `backend/data`. Absolute paths, including the test temp dir, stay absolute. |
+| WebSocket Origin | fixed | The upgrade path uses the same Origin/Referer check as a proxied write and writes 403 before any 101. |
+| Sockets survive logout and expiry | fixed | Open upgrade sockets are tracked per session and destroyed on `POST /logout` and when the session timer fires. |
+| `GET /api/v2/c2/beacon` mutates | fixed | GET only returns a copy of the queue. POST enrolls a new host and clears the queue. The Python beacon and the AD sensor POST. A cross-origin GET cannot empty the queue. |
+| API error handler always returned 500 | fixed | A 4xx `err.status` or `err.statusCode` is returned as that status with a generic body. Malformed JSON is 400 `{ error: "Bad request" }` and the body has no stack. |
+| Unrelated malformed cookies | fixed | A bad cookie other than `wt_session` is ignored. `/login` stays 200. A bad `wt_session` is still 400. |
+| Login throttle behind a proxy | fixed | `X-Forwarded-For` is used only when the socket address equals `WATCHTOWER_TRUSTED_PROXY`. Otherwise the socket address is the bucket. |
+| OTA zip path in tests | fixed | The upload test sets `WATCHTOWER_UPDATES_DIR` to a temp directory. `backend/updates/update_core.zip` is not written. |
+| Public OTA base | fixed | `.env.example` documents `WATCHTOWER_PUBLIC_BASE_URL`. If it is unset, startup warns and upload returns 503. No `127.0.0.1` target is queued. |
+
+`GET /api/v2/policies/sync` still enrolls an unknown host. That route was not one of the four threads. The beacon queue is the route that no longer mutates on GET.
