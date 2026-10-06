@@ -1,6 +1,6 @@
 # Step 5 harness run — 2026-10-06
 
-**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC). Beacon and login close re-run: 2026-10-06 02:34 AM PDT (2026-10-06 09:34:17 UTC).
+**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC). Beacon and login close re-run: 2026-10-06 02:34 AM PDT (2026-10-06 09:34:17 UTC). Proxy-path close re-run: 2026-10-06 02:47 AM PDT (2026-10-06 09:47:55 UTC).
 **Runner:** isolated CI/VM (this workspace). No live hosts.
 **Node:** `v22.14.0`
 **Paper:** `jratdish1/knowledge-base` `ops/vao-torch/tasks/VAO-TASK-20261002-STEP5-HARNESS-PAPER.md` (blob `0940f85c3d297b3ce9f9744e87795e3075d902ad`). `gh api repos/jratdish1/knowledge-base/contents/...` returned HTTP 404; the file was read through the authenticated contents API. Paper score at plant: 16 specified, 0 executed. This receipt is the run.
@@ -19,10 +19,12 @@
 | cookie and template-key commit | `f0cde0ba2804833220c85eadf04f44bac66bf507` |
 | prior tip (before data-dir close) | `af3a9aa12de9875f6d1fe13857de609d1bce5754` |
 | data-dir commit | `46dc8556fb28d8ca934113423f3faa72dd0e74af` |
-| prior tip (before this close) | `dd2148ad5c0bc9af4f18bbb52a0882c059cf2c26` |
-| head (beacon and login commit) | `cfa58b0896ee012ec506392d1278c408ae16872b` |
+| prior tip (before beacon close) | `dd2148ad5c0bc9af4f18bbb52a0882c059cf2c26` |
+| beacon and login commit | `cfa58b0896ee012ec506392d1278c408ae16872b` |
+| prior tip (before this close) | `b12210c600e74eb90d98d6c6bd27724c3034998f` |
+| head (proxy-path commit) | `ac8352e0547f0144d35915bd079b6b4d08e8d61c` |
 
-`head` is `cfa58b0896ee012ec506392d1278c408ae16872b`, the commit that delivers each beacon command id at most once, stops `GET /api/v2/policies/sync` from enrolling hosts, and tightens the login throttle and session cookie. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
+`head` is `ac8352e0547f0144d35915bd079b6b4d08e8d61c`, the commit that allowlists browser proxy routes after path normalization, reserves `UPDATE_CORE` and `UPDATE_POLICY` for server paths, and rejects a placeholder key padded with whitespace. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
@@ -31,16 +33,16 @@ Working directory for every command: repository root.
 | Command | Exit | Passed | Failed | Skipped |
 |---------|------|--------|--------|---------|
 | `node backend/test/allowlist.test.js` | 0 | 19 | 0 | 0 |
-| `node backend/test/auth.test.js` | 0 | 148 | 0 | 0 |
-| `node backend/test/c2-socket.test.js` | 0 | 11 | 0 | 0 |
+| `node backend/test/auth.test.js` | 0 | 159 | 0 | 0 |
+| `node backend/test/c2-socket.test.js` | 0 | 16 | 0 | 0 |
 | `node frontend/test/xss-static.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/csp-headers.test.js` | 0 | 34 | 0 | 0 |
-| `node frontend/test/ui-auth.test.js` | 0 | 109 | 0 | 0 |
+| `node frontend/test/ui-auth.test.js` | 0 | 129 | 0 | 0 |
 | `node frontend/test/step5-harness.test.js` | 0 | 62 | 0 | 0 |
 
 Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=62 failed=0 skipped=0`
 
-Combined checks: **394 passed, 0 failed, 0 skipped.** Auth is 148 (startup refusal, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, beacon command delivered once, policy sync does not enroll, 253-character host cap, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 109. Step 5 is 62. Allowlist 19, socket 11, XSS 11.
+Combined checks: **430 passed, 0 failed, 0 skipped.** Auth is 159 (startup refusal, padded placeholders, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, beacon command delivered once, policy sync does not enroll, 253-character host cap, reserved host names, OTA signature required before apply, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 129. Step 5 is 62. Allowlist 19, socket 16, XSS 11.
 
 ## Step 5 matrix (16)
 
@@ -171,7 +173,7 @@ Each item below is fixed in `f0cde0ba2804833220c85eadf04f44bac66bf507`. None are
 | Logout, expiry, reaping | fixed | `POST /logout` deletes the token and sets `Max-Age=0`. Sessions expire after `WATCHTOWER_UI_SESSION_MS` (default 8h). Login reaps expired sessions and caps the map at 32. |
 | Secure cookie | fixed | `WATCHTOWER_UI_COOKIE_SECURE=1` adds `Secure`. `0` forces it off. Otherwise `Secure` follows an `https://` `WATCHTOWER_UI_ORIGIN`. |
 | UI proxy default port | fixed | Default `WATCHTOWER_API_PORT` is `3000`, the same as `backend` / `.env.example`. |
-| `GET /` when logged out | fixed | No session redirects to `/login` (302). A malformed cookie on `/` is still 400. |
+| `GET /` when logged out | fixed | No session redirects to `/login` (302). A malformed `wt_session` on `/` also redirects to `/login`. |
 | Auto-remediate allowlist | fixed | Ingest calls `assertC2Command` before queueing. An unknown host is not queued. An enrolled host in a mapped group is queued only when the profile has `purge`. |
 | Vacuous `ALLOWLIST=0` test | fixed | The test keeps a valid on-disk allowlist with a mapped group and no purge cap. The deny is `DENY_PURGE_WITHOUT_CAP`. The log does not say `fail-closed empty map`. |
 | Harness checks that were hard-coded true | fixed | `getElementById` returns null unless the id is in `watchtower.html`. Mesh keyup hides a non-matching `.mesh-node`. OTA change writes the selected file name into the label. |
@@ -188,7 +190,7 @@ Each item below is fixed in `46dc8556fb28d8ca934113423f3faa72dd0e74af`. No 2FA/T
 | P1 `WATCHTOWER_DATA_DIR` follows cwd | fixed | Relative values resolve with `path.resolve(__dirname, '..', value)`. Starting from `backend/` with `./data` uses repo-root `data/` and does not create `backend/data`. Absolute paths, including the test temp dir, stay absolute. |
 | WebSocket Origin | fixed | The upgrade path uses the same Origin/Referer check as a proxied write and writes 403 before any 101. Matching, missing, and mismatched origins are covered. The missing-Origin case is `35cb2f054496b112e5ef8738c757bbfc11cb28ee`. |
 | Sockets survive logout and expiry | fixed | Open upgrade sockets are tracked per session and destroyed on `POST /logout` and when the session timer fires. |
-| `GET /api/v2/c2/beacon` mutates | fixed | GET only returns a copy of the queue. POST enrolls a new host and clears the queue. The Python beacon and the AD sensor POST. A cross-origin GET cannot empty the queue. |
+| `GET /api/v2/c2/beacon` mutates | superseded | `46dc855` stopped GET from enrolling. `cfa58b0` then delivers each command id once, which removes it from the queue. The UI proxy does not forward that route, including case, slash, encoding, and dot-segment variants (`ac8352e`). |
 | API error handler always returned 500 | fixed | A 4xx `err.status` or `err.statusCode` is returned as that status with a generic body. Malformed JSON is 400 `{ error: "Bad request" }` and the body has no stack. |
 | Unrelated malformed cookies | fixed | A bad cookie other than `wt_session` is ignored. `/login` stays 200. A bad `wt_session` is still 400. |
 | Login throttle behind a proxy | fixed | `X-Forwarded-For` is used only when the socket address equals `WATCHTOWER_TRUSTED_PROXY`. Otherwise the socket address is the bucket. |
@@ -208,3 +210,18 @@ P0 and P1 were 0. The data-dir fix stayed. Each item below is fixed in `cfa58b08
 | P2 `GET /api/v2/policies/sync` enrolls unknown hosts | fixed | That GET no longer writes `deviceGroupMap`. Enrollment is `POST /api/v2/c2/beacon` only. Every beacon, sync, and policy-reassign path rejects a host longer than 253 characters with 400, and that name is not stored. |
 | P2 malformed `wt_session` on `/login` is 400 | fixed | `GET /login` and `POST /login` treat a malformed `wt_session` as absent. `/watchtower.html` and the WebSocket upgrade still return 400. |
 | P2 session timer, cookie, logout, route table | fixed | `WATCHTOWER_UI_SESSION_MS` is clamped to 2147483647 ms before `setTimeout`. The session cookie `Max-Age` is that TTL in seconds (at least 1). `POST /logout` requires a matching Origin and leaves the session in place on 403. The Glass Pane has a Log out control that POSTs `/logout`. This route table matches those handlers. |
+
+The exact-path proxy deny in that table was bypassed by Express path normalization. That bypass, and the items below, are closed in `ac8352e0547f0144d35915bd079b6b4d08e8d61c`.
+
+## Independent review close (tip b12210c NOT_GRADE_A)
+
+P0 was 0. There was one new P1. No 2FA/TOTP and no audit log were added. The `0.0.0.0` bind, the beacon port, and delivery ack were left as they are.
+
+| Item | Status | What changed |
+|------|--------|----------------|
+| P1 proxy agent-route 403 fails open | fixed | The proxy normalizes the path (one percent-decode, lowercase, collapsed slashes, no dot segments, no trailing slash) and forwards only an allowlist under `/api/v2`: infrastructure, topology, OTA upload, and policy update. Every other `/api/v2` path is 403, including case, trailing-slash, double-slash, percent-encoded, and dot-segment forms. State-changing proxy requests still require a matching Origin. Those probes leave the beacon queue intact. |
+| P2 socket `c2_command` accepts internal verbs | fixed | The socket accepts only `quarantine`, `lock_dir`, `kill`, `disable_user`, and `rollback`. `UPDATE_CORE` and `UPDATE_POLICY` stay on the server OTA and policy paths. `watchtower_beacon.py` refuses to apply an update when the HMAC is missing or does not match the payload. |
+| P2 padded placeholder key | fixed | `operatorKeyProblem`, `operator_key.py`, and the AD sensor compare the trimmed value to the placeholder list. A non-placeholder key is stored as given. The socket handshake rejects a token whose trimmed form is a placeholder. |
+| P2 failure-map cap evicts active lockouts | fixed | Finished backoff rows are dropped first. Further eviction removes the oldest inactive rows only. An active lock stays when the map is over 64. |
+| P2 `GET /` malformed cookie is 400 | fixed | `GET /` redirects to `/login`. Duplicate `wt_session` cookies are kept only when every value is identical; otherwise the session is absent. |
+| P2 prototype host names return 500 | fixed | Host maps use `Object.create(null)`. `__proto__`, `constructor`, `prototype`, and `toString` are 400 and are not stored. |
