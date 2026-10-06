@@ -16,10 +16,13 @@ const apiHost = process.env.WATCHTOWER_API_HOST || '127.0.0.1';
 const sessions = new Map();
 const sessionSockets = new Map();
 const sessionTimers = new Map();
-const SESSION_MS = Number(process.env.WATCHTOWER_UI_SESSION_MS) > 0
-    ? Number(process.env.WATCHTOWER_UI_SESSION_MS)
+const MAX_TIMEOUT_MS = 2147483647;
+const REQUESTED_SESSION_MS = Number(process.env.WATCHTOWER_UI_SESSION_MS);
+const SESSION_MS = REQUESTED_SESSION_MS > 0
+    ? Math.min(REQUESTED_SESSION_MS, MAX_TIMEOUT_MS)
     : 8 * 60 * 60 * 1000;
 const MAX_SESSIONS = 32;
+const LOGIN_FAILURE_CAP = 64;
 const LOGO_PATH = path.join(__dirname, '../assets/watchtower_logo.png');
 const loginFailures = new Map();
 
@@ -41,7 +44,8 @@ function cookieSecure() {
 function sessionCookie(token) {
     const secure = cookieSecure() ? '; Secure' : '';
     if (!token) return 'wt_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' + secure;
-    return 'wt_session=' + token + '; HttpOnly; SameSite=Strict; Path=/' + secure;
+    const maxAge = Math.max(1, Math.floor(SESSION_MS / 1000));
+    return 'wt_session=' + token + '; HttpOnly; SameSite=Strict; Path=/; Max-Age=' + maxAge + secure;
 }
 
 function readCookieHeader(header) {
@@ -90,7 +94,7 @@ function armSession(token) {
     const exp = sessions.get(token);
     const prev = sessionTimers.get(token);
     if (prev) clearTimeout(prev);
-    const delay = Math.max(0, exp - Date.now());
+    const delay = Math.min(MAX_TIMEOUT_MS, Math.max(0, exp - Date.now()));
     const timer = setTimeout(() => {
         if (sessions.has(token) && sessions.get(token) <= Date.now()) destroySession(token);
     }, delay);
@@ -146,26 +150,42 @@ function clientIp(req) {
     if (trusted && socketIp === trusted) {
         const forwarded = req.headers['x-forwarded-for'];
         if (forwarded) {
-            const first = String(forwarded).split(',')[0].trim();
-            if (first) return normalizeIp(first);
+            const hops = String(forwarded).split(',').map((part) => part.trim()).filter(Boolean);
+            const last = hops.length ? hops[hops.length - 1] : '';
+            if (last) return normalizeIp(last);
         }
     }
     return socketIp || 'unknown';
 }
 
+function pruneLoginFailures(now) {
+    for (const [ip, row] of [...loginFailures]) {
+        if (row.until > 0 && row.until <= now) loginFailures.delete(ip);
+    }
+    while (loginFailures.size > LOGIN_FAILURE_CAP) {
+        const oldest = loginFailures.keys().next().value;
+        loginFailures.delete(oldest);
+    }
+}
+
 function loginThrottled(ip) {
+    pruneLoginFailures(Date.now());
     const row = loginFailures.get(ip);
     return !!(row && row.until > Date.now());
 }
 
 function noteLoginFailure(ip) {
+    const now = Date.now();
+    pruneLoginFailures(now);
     const row = loginFailures.get(ip) || { count: 0, until: 0 };
     row.count += 1;
     if (row.count >= 5) {
         const delay = Math.min(60000, 1000 * Math.pow(2, row.count - 5));
-        row.until = Date.now() + delay;
+        row.until = now + delay;
     }
+    loginFailures.delete(ip);
     loginFailures.set(ip, row);
+    pruneLoginFailures(now);
 }
 
 function noteLoginSuccess(ip) {
@@ -217,8 +237,6 @@ function loginPage(nonce) {
 }
 
 function sendLogin(req, res) {
-    const parsed = cookiesOf(req);
-    if (parsed.malformed) return generic(res, 400);
     const nonce = crypto.randomBytes(16).toString('base64url');
     applySecurityHeaders(res, nonce);
     res.setHeader('Cache-Control', 'no-store');
@@ -240,8 +258,6 @@ app.get('/', (req, res) => {
 });
 
 app.post('/login', express.json({ limit: '8kb' }), (req, res) => {
-    const parsed = cookiesOf(req);
-    if (parsed.malformed) return generic(res, 400);
     const ip = clientIp(req);
     if (loginThrottled(ip)) return generic(res, 429);
     const provided = req.body && typeof req.body.key === 'string' ? req.body.key : req.headers['x-api-key'];
@@ -264,6 +280,7 @@ app.post('/login', express.json({ limit: '8kb' }), (req, res) => {
 app.post('/logout', (req, res) => {
     const parsed = cookiesOf(req);
     if (parsed.malformed) return generic(res, 400);
+    if (!originAllowed(req)) return generic(res, 403);
     const token = parsed.cookies.wt_session;
     if (token) destroySession(token);
     res.setHeader('Set-Cookie', sessionCookie(''));
@@ -295,7 +312,13 @@ app.get('/assets/watchtower_logo.png', (req, res) => {
     res.sendFile(LOGO_PATH);
 });
 
+function agentOnlyPath(urlPath) {
+    const pathOnly = String(urlPath || '').split('?')[0];
+    return pathOnly === '/api/v2/c2/beacon' || pathOnly === '/api/v2/policies/sync';
+}
+
 function proxyToApi(req, res) {
+    if (agentOnlyPath(req.originalUrl || req.url)) return generic(res, 403);
     const method = String(req.method || 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && !originAllowed(req)) {
         return generic(res, 403);

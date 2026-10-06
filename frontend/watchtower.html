@@ -299,6 +299,7 @@
         </h1>
         <div class="status-container">
             <div style="display:flex; align-items:center; gap:10px;">
+                <button id="fe-logout-btn" type="button" title="Sign out" style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.2); color:var(--text); font-family:'Fira Code'; font-size:0.65rem; padding:6px 10px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold;">Log out</button>
                 <button id="fe-pause-btn" title="Operator pause (local)" style="background:rgba(245,158,11,0.1); border:1px solid var(--warning); color:var(--warning); font-family:'Fira Code'; font-size:0.65rem; padding:6px 10px; border-radius:8px; cursor:pointer; text-transform:uppercase; font-weight:bold;">Pause</button>
                 <div class="status-indicator" id="connection-status-box" data-state="conn.offline_initial" data-state-at="">
                     <div class="pulse" id="connection-pulse"></div>
@@ -1479,6 +1480,9 @@
         bindClick('fe-open-policy', () => openPolicyModal());
         bindClick('fe-open-infra', () => openInfraModal());
         bindClick('fe-pause-btn', () => toggleOperatorPause());
+        bindClick('fe-logout-btn', () => {
+            fetch('/logout', { method: 'POST' }).finally(() => { location.assign('/login'); });
+        });
         bindClick('clear-filter-btn', () => clearDeviceFilter());
         bindClick('fe-close-inspector', () => closeModal());
         bindClick('fe-close-policy', () => document.getElementById('policy-modal').classList.remove('active'));

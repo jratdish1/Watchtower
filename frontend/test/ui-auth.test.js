@@ -181,6 +181,7 @@ function cookiePair(res) {
     check('POST /login valid key → 200', good.status === 200, String(good.status));
     check('session cookie is HttpOnly', /HttpOnly/i.test(setCookie), setCookie);
     check('session cookie is SameSite=Strict', /SameSite=Strict/i.test(setCookie), setCookie);
+    check('session cookie Max-Age matches the default TTL', /Max-Age=28800/.test(setCookie), setCookie);
     check('login response does not contain the key', !good.body.includes(TEST_OPERATOR_KEY));
     const cookie = setCookie.split(';')[0];
 
@@ -192,6 +193,10 @@ function cookiePair(res) {
         && !html.body.includes('WATCHTOWER_DEFAULT_KEY')
         && !html.body.includes('YOUR_SECRET_API_KEY_HERE')
         && !html.body.includes('x-api-key')
+    );
+    check(
+      'Glass Pane has a logout control',
+      html.body.includes('id="fe-logout-btn"') && html.body.includes("fetch('/logout'") && !/id="fe-logout-btn"[^>]*data-mutate/.test(html.body)
     );
     const hidden = await rawRequest(port, 'GET', '/serve_ui.js', { Cookie: cookie });
     check('authenticated /serve_ui.js is not served', hidden.status === 404, String(hidden.status));
@@ -207,7 +212,11 @@ function cookiePair(res) {
     const logoAnon = await rawRequest(port, 'GET', '/assets/watchtower_logo.png');
     check('logo without a session → 401', logoAnon.status === 401, String(logoAnon.status));
 
-    const loggedOut = await rawRequest(port, 'POST', '/logout', { Cookie: cookie });
+    const noOriginLogout = await rawRequest(port, 'POST', '/logout', { Cookie: cookie });
+    check('logout without Origin is forbidden', noOriginLogout.status === 403 && noOriginLogout.json && noOriginLogout.json.error === 'Forbidden', noOriginLogout.body);
+    const stillIn = await rawRequest(port, 'GET', '/watchtower.html', { Cookie: cookie });
+    check('logout without Origin keeps the session', stillIn.status === 200, String(stillIn.status));
+    const loggedOut = await rawRequest(port, 'POST', '/logout', { Cookie: cookie, Origin: 'http://127.0.0.1:' + port });
     check('POST /logout clears the session', loggedOut.status === 200 && /Max-Age=0/i.test(cookiePair(loggedOut)), cookiePair(loggedOut));
     const afterLogout = await rawRequest(port, 'GET', '/watchtower.html', { Cookie: cookie });
     check('logged-out cookie no longer opens the UI', afterLogout.status === 401, String(afterLogout.status));
@@ -219,7 +228,12 @@ function cookiePair(res) {
     check('malformed cookie is 400', badCookie.status === 400, String(badCookie.status) + ' ' + badCookie.body);
     check('malformed cookie body is generic', badCookie.json && badCookie.json.error === 'Bad request' && !leaks(badCookie.body), badCookie.body);
     const badLogin = await rawRequest(port, 'GET', '/login', { Cookie: 'wt_session=%E0%A4%A' });
-    check('malformed session cookie on /login is 400', badLogin.status === 400 && !leaks(badLogin.body), badLogin.body);
+    check('malformed session cookie on /login is treated as absent', badLogin.status === 200 && badLogin.body.includes('Operator key') && !leaks(badLogin.body), String(badLogin.status) + ' ' + badLogin.body.slice(0, 180));
+    const badLoginPost = await rawRequest(port, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      Cookie: 'wt_session=%E0%A4%A',
+    }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    check('POST /login with a malformed session cookie still succeeds', badLoginPost.status === 200 && /Max-Age=28800/.test(cookiePair(badLoginPost)), String(badLoginPost.status) + ' ' + badLoginPost.body);
     const otherCookie = await rawRequest(port, 'GET', '/login', { Cookie: 'prefs=%E0%A4%A' });
     check('unrelated malformed cookie still serves /login', otherCookie.status === 200, String(otherCookie.status) + ' ' + otherCookie.body);
     const otherRoot = await rawRequest(port, 'GET', '/', { Cookie: 'theme=%' });
@@ -293,6 +307,10 @@ function cookiePair(res) {
     const alerts = await rawRequest(uiPort, 'GET', '/api/alerts', { Cookie: cookie });
     check('proxied alerts with a session and no browser key → 200', alerts.status === 200 && Array.isArray(alerts.json), JSON.stringify(alerts.json));
     check('proxied body does not echo the key', !alerts.body.includes(TEST_OPERATOR_KEY));
+    const beaconProxy = await rawRequest(uiPort, 'GET', '/api/v2/c2/beacon?host=ops-1', { Cookie: cookie });
+    check('UI proxy refuses beacon GET', beaconProxy.status === 403 && beaconProxy.json && beaconProxy.json.error === 'Forbidden', beaconProxy.body);
+    const syncProxy = await rawRequest(uiPort, 'GET', '/api/v2/policies/sync?host=ghost-fixture', { Cookie: cookie });
+    check('UI proxy refuses policy sync GET', syncProxy.status === 403 && syncProxy.json && syncProxy.json.error === 'Forbidden', syncProxy.body);
 
     const denied = await new Promise((resolve) => {
       const socket = io('http://127.0.0.1:' + uiPort, {
@@ -401,7 +419,7 @@ function cookiePair(res) {
         const timer = setTimeout(() => resolve('timeout'), 2000);
         live.on('disconnect', () => { clearTimeout(timer); resolve('disconnected'); });
       });
-      const loggedOut = await rawRequest(uiPort, 'POST', '/logout', { Cookie: cookie });
+      const loggedOut = await rawRequest(uiPort, 'POST', '/logout', { Cookie: cookie, Origin: 'http://127.0.0.1:' + uiPort });
       const closed = await gone;
       check('logout returns ok', loggedOut.status === 200, String(loggedOut.status));
       check('logout closes the open WebSocket', closed === 'disconnected', closed);
@@ -470,6 +488,90 @@ function cookiePair(res) {
     check('a different forwarded client can still log in', other.status === 200, other.body);
   } finally {
     trusted.child.kill('SIGTERM');
+  }
+
+  const rightPort = await freePort();
+  const rightmost = spawnUi(rightPort, { WATCHTOWER_TRUSTED_PROXY: '127.0.0.1' });
+  try {
+    await rightmost.ready;
+    for (let i = 0; i < 5; i++) {
+      const miss = await rawRequest(rightPort, 'POST', '/login', {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '198.51.100.50, 203.0.113.8',
+      }, JSON.stringify({ key: 'z'.repeat(32) }));
+      check('rightmost-hop failure ' + (i + 1) + ' is 401', miss.status === 401, String(miss.status));
+    }
+    const rotated = await rawRequest(rightPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '198.51.100.77, 203.0.113.8',
+    }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    check('rotating the leftmost X-Forwarded-For hop does not bypass the throttle', rotated.status === 429, rotated.body);
+    const spoofLeft = await rawRequest(rightPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.9, 203.0.113.8',
+    }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    check('a spoofed operator address on the left does not move the throttle bucket', spoofLeft.status === 429, spoofLeft.body);
+    const operator = await rawRequest(rightPort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.8, 203.0.113.9',
+    }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    check('the rightmost hop is the throttle bucket', operator.status === 200, operator.body);
+  } finally {
+    rightmost.child.kill('SIGTERM');
+  }
+
+  const prunePort = await freePort();
+  const pruned = spawnUi(prunePort, { WATCHTOWER_TRUSTED_PROXY: '127.0.0.1' });
+  try {
+    await pruned.ready;
+    for (let i = 0; i < 5; i++) {
+      const miss = await rawRequest(prunePort, 'POST', '/login', {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '203.0.113.20',
+      }, JSON.stringify({ key: 'z'.repeat(32) }));
+      check('prune-target failure ' + (i + 1) + ' is 401', miss.status === 401, String(miss.status));
+    }
+    const locked = await rawRequest(prunePort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.20',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    check('prune target is throttled before the cap', locked.status === 429, locked.body);
+    let fillerOk = true;
+    for (let i = 0; i < 64; i++) {
+      const miss = await rawRequest(prunePort, 'POST', '/login', {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '198.51.100.' + (i + 1),
+      }, JSON.stringify({ key: 'z'.repeat(32) }));
+      if (miss.status !== 401) {
+        fillerOk = false;
+        break;
+      }
+    }
+    check('filler login failures stay 401', fillerOk);
+    const afterCap = await rawRequest(prunePort, 'POST', '/login', {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '203.0.113.20',
+    }, JSON.stringify({ key: 'z'.repeat(32) }));
+    check('login failure map drops the oldest row at the cap', afterCap.status === 401, afterCap.body);
+  } finally {
+    pruned.child.kill('SIGTERM');
+  }
+
+  const hugePort = await freePort();
+  const huge = spawnUi(hugePort, { WATCHTOWER_UI_SESSION_MS: '999999999999' });
+  try {
+    await huge.ready;
+    const session = await rawRequest(hugePort, 'POST', '/login', { 'Content-Type': 'application/json' }, JSON.stringify({ key: TEST_OPERATOR_KEY }));
+    const hugeCookie = cookiePair(session);
+    check(
+      'session TTL is clamped below the setTimeout overflow',
+      session.status === 200 && /Max-Age=2147483/.test(hugeCookie) && !/Max-Age=999999999/.test(hugeCookie),
+      hugeCookie
+    );
+    const page = await rawRequest(hugePort, 'GET', '/watchtower.html', { Cookie: hugeCookie.split(';')[0] });
+    check('clamped session is still valid immediately', page.status === 200, String(page.status));
+  } finally {
+    huge.child.kill('SIGTERM');
   }
 
   const shortWsPort = await freePort();

@@ -86,6 +86,31 @@ app.use('/assets', express.static(path.join(__dirname, '../assets')));
 
 const allowlist = require('./allowlist');
 
+const MAX_HOST_NAME = 253;
+
+/** Assign a stable id so each command is delivered at most once, including to GET-polling beacons. */
+function enqueueCommand(host, fields) {
+    if (!c2Queue[host]) c2Queue[host] = [];
+    const command = { id: crypto.randomUUID(), timestamp: Date.now() };
+    Object.keys(fields).forEach((key) => { command[key] = fields[key]; });
+    c2Queue[host].push(command);
+    return command;
+}
+
+function takeCommands(host) {
+    const commands = c2Queue[host] ? c2Queue[host].slice() : [];
+    if (Object.prototype.hasOwnProperty.call(c2Queue, host)) delete c2Queue[host];
+    return commands;
+}
+
+function parseHost(value) {
+    if (typeof value !== 'string') return { status: 400, error: 'Host parameter required' };
+    const host = value.trim();
+    if (!host) return { status: 400, error: 'Host parameter required' };
+    if (host.length > MAX_HOST_NAME) return { status: 400, error: 'Bad request' };
+    return { host };
+}
+
 /** Queue a beacon command. Destructive verbs require purge capability, even when the group allowlist flag is off. */
 function queueHostCommand(host, action, target) {
     if (allowlist.isPurgeOrDestructiveAction(action)) {
@@ -95,8 +120,7 @@ function queueHostCommand(host, action, target) {
             return deny;
         }
     }
-    if (!c2Queue[host]) c2Queue[host] = [];
-    c2Queue[host].push({ action: action, target: target, timestamp: Date.now() });
+    enqueueCommand(host, { action: action, target: target });
     return null;
 }
 
@@ -408,16 +432,19 @@ app.post('/api/v2/ingest/inventory', authenticate, (req, res) => {
 
 
 app.get('/api/v2/c2/beacon', authenticate, (req, res) => {
-    const host = req.query.host;
-    if (!host) return res.status(400).json({ error: 'Host parameter required' });
-    // Read-only. A cross-origin GET must not enroll a host or empty the queue.
-    const commands = c2Queue[host] ? c2Queue[host].slice() : [];
+    const parsed = parseHost(req.query.host);
+    if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
+    // Does not enroll. Each command id is removed after this response so a GET-polling
+    // beacon runs it once. The UI proxy refuses this path so a browser cannot consume it.
+    const commands = takeCommands(parsed.host);
     res.json({ status: 'ok', commands });
 });
 
 app.post('/api/v2/c2/beacon', authenticate, (req, res) => {
-    const host = (req.body && req.body.host) || req.query.host;
-    if (!host || typeof host !== 'string') return res.status(400).json({ error: 'Host parameter required' });
+    const raw = (req.body && req.body.host) || req.query.host;
+    const parsed = parseHost(raw);
+    if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
+    const host = parsed.host;
 
     if (!deviceGroupMap[host]) {
         deviceGroupMap[host] = 'Default';
@@ -425,28 +452,24 @@ app.post('/api/v2/c2/beacon', authenticate, (req, res) => {
         io.emit('policy_sync', { groups: groupDB, deviceGroups: deviceGroupMap });
     }
 
-    const commands = c2Queue[host] || [];
-    c2Queue[host] = [];
+    const commands = takeCommands(host);
     res.json({ status: 'ok', commands });
 });
 
 app.get('/api/v2/policies/sync', authenticate, (req, res) => {
-    const host = req.query.host;
-    if (!host) return res.status(400).json({ error: 'Host parameter required' });
-    
-    if(!deviceGroupMap[host]) {
-        deviceGroupMap[host] = "Default";
-        saveDB();
-    }
-    
-    const groupName = deviceGroupMap[host];
-    const policy = groupDB[groupName] || groupDB["Default"];
-    
+    const parsed = parseHost(req.query.host);
+    if (parsed.error) return res.status(parsed.status).json({ error: parsed.error });
+    // Read-only. Unknown hosts receive the Default policy and are not written into deviceGroupMap.
+    const groupName = deviceGroupMap[parsed.host] || 'Default';
+    const policy = groupDB[groupName] || groupDB['Default'];
     res.json({ status: 'ok', policy: policy, group: groupName });
 });
 
 app.post('/api/v2/policies/update', authenticate, (req, res) => {
     const { group, policy, host, newGroup } = req.body;
+    if (typeof host === 'string' && host.length > MAX_HOST_NAME) {
+        return res.status(400).json({ error: 'Bad request' });
+    }
 
     // Allowlist adapter (CALL A). WATCHTOWER_ALLOWLIST=0 does not skip this.
     if (host && newGroup) {
@@ -462,8 +485,7 @@ app.post('/api/v2/policies/update', authenticate, (req, res) => {
         deviceGroupMap[host] = newGroup;
         saveDB();
         
-        if (!c2Queue[host]) c2Queue[host] = [];
-        c2Queue[host].push({ action: "UPDATE_POLICY", target: "Refresh", timestamp: Date.now() });
+        enqueueCommand(host, { action: 'UPDATE_POLICY', target: 'Refresh' });
         console.log(`[POLICY] Assigned ${host} to Group '${newGroup}'`);
         
     } else if (group && policy) {
@@ -472,8 +494,7 @@ app.post('/api/v2/policies/update', authenticate, (req, res) => {
         
         Object.keys(deviceGroupMap).forEach(h => {
              if (deviceGroupMap[h] === group) {
-                 if (!c2Queue[h]) c2Queue[h] = [];
-                 c2Queue[h].push({ action: "UPDATE_POLICY", target: "Refresh", timestamp: Date.now() });
+                 enqueueCommand(h, { action: 'UPDATE_POLICY', target: 'Refresh' });
              }
         });
         console.log(`[POLICY] Updated group '${group}'`);
@@ -510,8 +531,7 @@ app.post('/api/v2/ota/upload', authenticate, (req, res) => {
         
         Object.keys(deviceGroupMap).forEach(h => {
              if (deviceGroupMap[h] === groupName || groupName === "ALL") {
-                 if (!c2Queue[h]) c2Queue[h] = [];
-                 c2Queue[h].push({ action: "UPDATE_CORE", target: targetUrl, hmac: fileHmac, timestamp: Date.now() });
+                 enqueueCommand(h, { action: 'UPDATE_CORE', target: targetUrl, hmac: fileHmac });
                  hostsUpdated++;
              }
         });

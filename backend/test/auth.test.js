@@ -360,24 +360,38 @@ function auth(key) {
     }, auth(KEY)), threatBody('ops-1'));
     check('threat ingest for an allowlisted host → 201', ingested.status === 201, String(ingested.status));
     const beacon = await request(autoOn.port, 'GET', '/api/v2/c2/beacon?host=ops-1', auth(KEY));
+    const firstCmd = beacon.json && beacon.json.commands && beacon.json.commands.find((c) => c.action === 'quarantine');
     check(
       'AUTO_REMEDIATE queues quarantine for an allowlisted host with purge',
-      beacon.status === 200 && beacon.json && beacon.json.commands && beacon.json.commands.some((c) => c.action === 'quarantine'),
+      beacon.status === 200 && !!firstCmd && typeof firstCmd.id === 'string' && firstCmd.id.length > 0,
       JSON.stringify(beacon.json)
     );
     const beaconAgain = await request(autoOn.port, 'GET', '/api/v2/c2/beacon?host=ops-1', auth(KEY));
     check(
-      'GET beacon does not empty the queue',
-      beaconAgain.status === 200 && beaconAgain.json && beaconAgain.json.commands && beaconAgain.json.commands.some((c) => c.action === 'quarantine'),
+      'GET beacon delivers a command id at most once',
+      beaconAgain.status === 200 && beaconAgain.json && Array.isArray(beaconAgain.json.commands) && beaconAgain.json.commands.length === 0,
       JSON.stringify(beaconAgain.json)
     );
     const pulled = await request(autoOn.port, 'POST', '/api/v2/c2/beacon?host=ops-1', Object.assign({
       'Content-Type': 'application/json',
     }, auth(KEY)), '{}');
     check(
-      'POST beacon returns the queued command',
-      pulled.status === 200 && pulled.json && pulled.json.commands && pulled.json.commands.some((c) => c.action === 'quarantine'),
+      'POST beacon does not return a command already delivered by GET',
+      pulled.status === 200 && pulled.json && Array.isArray(pulled.json.commands) && pulled.json.commands.length === 0,
       JSON.stringify(pulled.json)
+    );
+    const ingestedAgain = await request(autoOn.port, 'POST', '/api/v2/ingest/threat', Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), threatBody('ops-1'));
+    check('second threat ingest for the same host → 201', ingestedAgain.status === 201, String(ingestedAgain.status));
+    const posted = await request(autoOn.port, 'POST', '/api/v2/c2/beacon?host=ops-1', Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), '{}');
+    const postedCmd = posted.json && posted.json.commands && posted.json.commands.find((c) => c.action === 'quarantine');
+    check(
+      'POST beacon returns a command that GET has not delivered',
+      posted.status === 200 && !!postedCmd && typeof postedCmd.id === 'string' && postedCmd.id !== firstCmd.id,
+      JSON.stringify(posted.json)
     );
     const afterPull = await request(autoOn.port, 'GET', '/api/v2/c2/beacon?host=ops-1', auth(KEY));
     check(
@@ -389,6 +403,67 @@ function auth(key) {
     if (autoOn) autoOn.stop();
     try { fs.unlinkSync(autoPath); } catch (_) {}
     try { fs.unlinkSync(enrolledDb); } catch (_) {}
+  }
+
+  const enrollApi = await startApi({ WATCHTOWER_API_KEY: KEY });
+  try {
+    function enrollDb() {
+      const file = path.join(enrollApi.tmp, 'db.json');
+      if (!fs.existsSync(file)) return { deviceGroups: {} };
+      return JSON.parse(fs.readFileSync(file, 'utf8'));
+    }
+    const ghost = await request(enrollApi.port, 'GET', '/api/v2/policies/sync?host=ghost-fixture', auth(KEY));
+    check(
+      'GET policies/sync does not enroll an unknown host',
+      ghost.status === 200 && ghost.json && ghost.json.group === 'Default' && !Object.prototype.hasOwnProperty.call(enrollDb().deviceGroups || {}, 'ghost-fixture'),
+      JSON.stringify(ghost.json) + ' ' + JSON.stringify(enrollDb().deviceGroups)
+    );
+    const longHost = 'h'.repeat(254);
+    const longSync = await request(enrollApi.port, 'GET', '/api/v2/policies/sync?host=' + longHost, auth(KEY));
+    check(
+      'GET policies/sync rejects a host longer than 253',
+      longSync.status === 400 && !Object.prototype.hasOwnProperty.call(enrollDb().deviceGroups || {}, longHost),
+      String(longSync.status) + ' ' + longSync.body
+    );
+    const longBeacon = await request(enrollApi.port, 'GET', '/api/v2/c2/beacon?host=' + longHost, auth(KEY));
+    check('GET beacon rejects a host longer than 253', longBeacon.status === 400, String(longBeacon.status));
+    const peek = await request(enrollApi.port, 'GET', '/api/v2/c2/beacon?host=beacon-only', auth(KEY));
+    check(
+      'GET beacon does not enroll an unknown host',
+      peek.status === 200 && !Object.prototype.hasOwnProperty.call(enrollDb().deviceGroups || {}, 'beacon-only'),
+      JSON.stringify(enrollDb().deviceGroups)
+    );
+    const longPost = await request(enrollApi.port, 'POST', '/api/v2/c2/beacon?host=' + longHost, Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), '{}');
+    check(
+      'POST beacon rejects a host longer than 253',
+      longPost.status === 400 && !Object.prototype.hasOwnProperty.call(enrollDb().deviceGroups || {}, longHost),
+      String(longPost.status) + ' ' + longPost.body
+    );
+    const longAssign = await request(enrollApi.port, 'POST', '/api/v2/policies/update', Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), JSON.stringify({ host: longHost, newGroup: 'Default' }));
+    check('policy reassign rejects a host longer than 253', longAssign.status === 400, String(longAssign.status) + ' ' + longAssign.body);
+    const joined = await request(enrollApi.port, 'POST', '/api/v2/c2/beacon?host=short-host', Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), '{}');
+    check(
+      'POST beacon enrolls a host',
+      joined.status === 200 && enrollDb().deviceGroups && enrollDb().deviceGroups['short-host'] === 'Default',
+      JSON.stringify(enrollDb().deviceGroups)
+    );
+    const maxHost = 'a'.repeat(253);
+    const maxJoin = await request(enrollApi.port, 'POST', '/api/v2/c2/beacon?host=' + maxHost, Object.assign({
+      'Content-Type': 'application/json',
+    }, auth(KEY)), '{}');
+    check(
+      'POST beacon accepts a 253 character host',
+      maxJoin.status === 200 && enrollDb().deviceGroups && enrollDb().deviceGroups[maxHost] === 'Default',
+      String(maxJoin.status)
+    );
+  } finally {
+    enrollApi.stop();
   }
 
   fs.writeFileSync(capPath, JSON.stringify({
