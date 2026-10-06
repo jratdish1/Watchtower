@@ -7,7 +7,10 @@ import platform
 import subprocess
 
 API_URL = os.environ.get("WATCHTOWER_API_URL", "http://127.0.0.1:4040")
-API_KEY = os.environ.get("WATCHTOWER_API_KEY", "WATCHTOWER_DEFAULT_KEY")
+import sys as _wt_sys
+_wt_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from operator_key import require_operator_key
+API_KEY = require_operator_key()
 HOSTNAME = os.uname().nodename if hasattr(os, 'uname') else "Local-Node"
 
 def send_alert(title, details, severity="low"):

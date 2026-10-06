@@ -77,7 +77,13 @@ function queueHostCommand(host, action, target) {
     return null;
 }
 
-const DB_FILE = process.env.WATCHTOWER_DB_PATH || path.join(__dirname, '../data/watchtower_db.json');
+const DATA_DIR = process.env.WATCHTOWER_DATA_DIR
+    ? path.resolve(process.env.WATCHTOWER_DATA_DIR)
+    : path.join(__dirname, '../data');
+function dataFile(name) {
+    return path.join(DATA_DIR, name);
+}
+const DB_FILE = process.env.WATCHTOWER_DB_PATH || dataFile('watchtower_db.json');
 if (!fs.existsSync(path.dirname(DB_FILE))) {
     fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
 }
@@ -300,7 +306,7 @@ app.get('/api/alerts', authenticate, (req, res) => {
 // ------------------------------------------------------------------
 app.post('/api/v2/infrastructure', authenticate, (req, res) => {
     const payload = req.body;
-    const infraPath = path.join(__dirname, '../data/infrastructure.json');
+    const infraPath = dataFile('infrastructure.json');
     let infra = [];
     if (fs.existsSync(infraPath)) {
         try { infra = JSON.parse(fs.readFileSync(infraPath, 'utf8')); } catch(e){}
@@ -314,13 +320,13 @@ app.post('/api/v2/infrastructure', authenticate, (req, res) => {
 
 app.delete('/api/v2/infrastructure', authenticate, (req, res) => {
     if (denyPurgeWithoutCap(res)) return;
-    const infraPath = path.join(__dirname, '../data/infrastructure.json');
+    const infraPath = dataFile('infrastructure.json');
     if (fs.existsSync(infraPath)) fs.unlinkSync(infraPath);
     res.json({ status: 'ok', msg: 'Infrastructure cleared.' });
 });
 
 app.get('/api/v2/topology', authenticate, (req, res) => {
-    const topoPath = path.join(__dirname, '../data/detailed_network_topology.csv');
+    const topoPath = dataFile('detailed_network_topology.csv');
     if (!fs.existsSync(topoPath)) return res.json([]);
     const data = fs.readFileSync(topoPath, 'utf8');
     const lines = data.split('\n').filter(l => l.trim().length > 0);
@@ -340,13 +346,13 @@ app.get('/api/v2/topology', authenticate, (req, res) => {
 
 app.delete('/api/v2/topology', authenticate, (req, res) => {
     if (denyPurgeWithoutCap(res)) return;
-    const topoPath = path.join(__dirname, '../data/detailed_network_topology.csv');
-    const jsonPath = path.join(__dirname, '../data/historical_topology.json');
+    const topoPath = dataFile('detailed_network_topology.csv');
+    const jsonPath = dataFile('historical_topology.json');
     if (fs.existsSync(topoPath)) fs.unlinkSync(topoPath);
     if (fs.existsSync(jsonPath)) fs.unlinkSync(jsonPath);
     
     // Also clear raw dumps
-    const dumpsDir = path.join(__dirname, '../data/raw_mac_dumps');
+    const dumpsDir = dataFile('raw_mac_dumps');
     if (fs.existsSync(dumpsDir)) {
         fs.readdirSync(dumpsDir).forEach(f => fs.unlinkSync(path.join(dumpsDir, f)));
     }
@@ -474,7 +480,11 @@ app.post('/api/v2/ota/upload', authenticate, (req, res) => {
         const fileHmac = crypto.createHmac('sha256', API_KEY).update(req.body).digest('hex');
         
         let hostsUpdated = 0;
-        const targetUrl = `http://${req.headers.host}/updates/update_core.zip`;
+        const configuredBase = process.env.WATCHTOWER_PUBLIC_BASE_URL;
+        const baseUrl = (configuredBase && String(configuredBase).trim())
+            ? String(configuredBase).trim().replace(/\/$/, '')
+            : ('http://127.0.0.1:' + port);
+        const targetUrl = baseUrl + '/updates/update_core.zip';
         
         Object.keys(deviceGroupMap).forEach(h => {
              if (deviceGroupMap[h] === groupName || groupName === "ALL") {
@@ -517,7 +527,8 @@ app.post('/api/v2/ingest/threat', authenticate, (req, res) => {
         
         if (host && host !== 'mac-mini-hub' && host !== 'Local-Node' && host !== 'Austins-Mac-mini.local' && host !== 'localhost') {
             const action = enrichedPayload.event_type?.includes('AD') ? 'disable_user' : 'quarantine';
-            const queued = queueHostCommand(host, action, target);
+            const allowDeny = allowlist.assertC2Command({ action: action, target: target, host: host }, deviceGroupMap, groupDB);
+            const queued = allowDeny || queueHostCommand(host, action, target);
             if (queued) {
                 console.warn(`[C2 AUTO-REMEDIATE DENY] ${queued.rule} action=${action} host=${host}`);
             } else {
@@ -575,6 +586,12 @@ app.get('/api/memory/search', authenticate, (req, res) => {
 // ------------------------------------------------------------------
 // START
 // ------------------------------------------------------------------
+app.use((err, req, res, next) => {
+    console.error('[API] ' + (err && err.message ? err.message : 'handler error'));
+    if (res.headersSent) return;
+    res.status(500).json({ error: 'Request failed' });
+});
+
 server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
         console.error(`[FATAL] Port ${port} is occupied. Retrying in 3 seconds...`);

@@ -124,29 +124,36 @@ function walk(node, fn) {
   (node.children || []).forEach((child) => walk(child, fn));
 }
 
+function seedStaticDom(body, byId) {
+  const re = /<([a-z0-9]+)([^>]*?)\sid="([^"]+)"([^>]*)>/gi;
+  let match;
+  while ((match = re.exec(html))) {
+    const id = match[3];
+    if (byId.has(id)) continue;
+    const el = makeEl(id);
+    el.id = id;
+    el.tagName = match[1].toUpperCase();
+    const attrs = match[2] + ' ' + match[4];
+    if (/data-mutate="1"/.test(attrs)) el.setAttribute('data-mutate', '1');
+    body.appendChild(el);
+    byId.set(id, el);
+  }
+}
+
 function bootGlass() {
   const byId = new Map();
   const body = makeEl('body');
+  seedStaticDom(body, byId);
   const handlers = {};
   const emits = [];
   const document = {
     body,
     createElement() { return makeEl(''); },
     getElementById(id) {
-      if (!byId.has(id)) {
-        const el = makeEl(id);
-        el.id = id;
-        if (/btn|button|purge|ota-deploy|fe-/.test(id)) el.tagName = 'BUTTON';
-        body.appendChild(el);
-        byId.set(id, el);
-      }
-      return byId.get(id);
+      return byId.has(id) ? byId.get(id) : null;
     },
     querySelectorAll(sel) {
       const sels = selectorList(sel);
-      sels.forEach((s) => {
-        if (s.startsWith('#')) document.getElementById(s.slice(1));
-      });
       const hits = [];
       walk(body, (node) => {
         if (sels.some((s) => matches(node, s))) hits.push(node);
@@ -158,14 +165,11 @@ function bootGlass() {
     },
   };
 
-  const mutateIds = ['fe-purge-vault', 'fe-clear-maps', 'ota-deploy-btn', 'fe-save-infra', 'fe-open-ota'];
-  mutateIds.forEach((id) => {
-    const el = document.getElementById(id);
-    el.tagName = 'BUTTON';
-    el.setAttribute('data-mutate', '1');
-  });
-  document.getElementById('mesh-search').value = '';
-  document.getElementById('inv-search').value = '';
+  const meshSearch = document.getElementById('mesh-search');
+  const invSearch = document.getElementById('inv-search');
+  if (!meshSearch || !invSearch) throw new Error('static search inputs missing from watchtower.html');
+  meshSearch.value = '';
+  invSearch.value = '';
 
   const sandbox = {
     document,
@@ -582,14 +586,23 @@ async function runRow(n, title, fn) {
     pauseBtn.dispatch('click');
     check('pause click listener runs', connState(ui) === 'conn.paused');
     const mesh = ui.document.getElementById('mesh-search');
-    check('mesh search kept its keyup listener', (mesh._listeners.keyup || []).length === 1);
-    mesh.value = 'ops';
+    check('mesh search kept its keyup listener', mesh && (mesh._listeners.keyup || []).length === 1);
+    const meshNode = ui.document.createElement();
+    meshNode.id = 'ops-host';
+    meshNode.className = 'mesh-node';
+    ui.document.getElementById('mesh-grid').appendChild(meshNode);
+    mesh.value = 'no-such-host';
     mesh.dispatch('keyup');
-    check('mesh keyup listener runs', true);
+    check('mesh keyup hides a non-matching node', meshNode.style.display === 'none');
     const ota = ui.document.getElementById('ota-file-input');
-    check('ota file input kept its change listener', (ota._listeners.change || []).length === 1);
+    check('ota file input kept its change listener', ota && (ota._listeners.change || []).length === 1);
+    ota.files = [{ name: 'core.zip', size: 2048 }];
     ota.dispatch('change');
-    check('ota change listener runs', true);
+    check(
+      'ota change writes the selected file name',
+      ui.document.getElementById('ota-file-label').textContent.includes('core.zip')
+    );
+    check('missing markup id is not invented', ui.document.getElementById('not-a-real-control') === null);
     const openOta = ui.document.getElementById('fe-open-ota');
     openOta.dispatch('click');
     check('ota open click listener runs', String(ui.document.getElementById('ota-modal').className).includes('active'));

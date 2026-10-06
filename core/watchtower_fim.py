@@ -15,7 +15,10 @@ import watchtower_quarantine
 
 # Watchtower File Integrity Monitor (FIM) - Native High-Speed Queue
 API_URL = os.environ.get("WATCHTOWER_API_URL", "http://127.0.0.1:4040") + "/api/v2/ingest/fim"
-API_KEY = os.environ.get("WATCHTOWER_API_KEY", "WATCHTOWER_DEFAULT_KEY")
+import sys as _wt_sys
+_wt_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from operator_key import require_operator_key
+API_KEY = require_operator_key()
 HOSTNAME = os.uname().nodename if hasattr(os, 'uname') else "Local-Node"
 SIGNATURES_FILE = os.environ.get("WATCHTOWER_DATA_DIR", "../data") + "/signatures.json"
 WHITELIST_FILE = os.environ.get("WATCHTOWER_DATA_DIR", "../data") + "/whitelist.json"

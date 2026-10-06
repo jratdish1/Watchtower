@@ -64,6 +64,7 @@ async function startApi(extraEnv) {
     WATCHTOWER_API_PORT: String(port),
     WATCHTOWER_BIND_ADDRESS: '127.0.0.1',
     WATCHTOWER_DB_PATH: path.join(tmp, 'db.json'),
+    WATCHTOWER_DATA_DIR: tmp,
     WATCHTOWER_ALLOWLIST: '1',
     WATCHTOWER_OPERATOR_PROFILE_ID: '',
     WATCHTOWER_UI_ORIGIN: 'http://127.0.0.1:8080',

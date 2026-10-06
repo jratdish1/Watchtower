@@ -7,7 +7,10 @@ from datetime import datetime
 
 # Watchtower LanceDB Archiver
 WATCHTOWER_API = os.environ.get("WATCHTOWER_API_URL", "http://127.0.0.1:3000") + "/api/alerts"
-API_KEY = os.environ.get("WATCHTOWER_API_KEY", "WATCHTOWER_DEFAULT_KEY")
+import sys as _wt_sys
+_wt_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from operator_key import require_operator_key
+API_KEY = require_operator_key()
 LANCEDB_PATH = os.environ.get("WATCHTOWER_DATA_DIR", "../data") + "/security/watchtower.lancedb"
 
 # We use the SentenceTransformer from the RAG system to generate embeddings

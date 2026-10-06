@@ -1,0 +1,22 @@
+"""Fail closed when a client process has no private operator key."""
+import os
+import sys
+
+FORBIDDEN = (
+    "WATCHTOWER_DEFAULT_KEY",
+    "YOUR_SECRET_API_KEY_HERE",
+    "generate_a_secure_random_key_here",
+)
+MIN_LENGTH = 32
+
+
+def require_operator_key(name="WATCHTOWER_API_KEY"):
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "" or raw in FORBIDDEN or len(raw) < MIN_LENGTH:
+        sys.stderr.write(
+            "[Watchtower] Refusing to start: "
+            + name
+            + " is unset, empty, a public placeholder, or shorter than 32 characters.\n"
+        )
+        raise SystemExit(1)
+    return raw
