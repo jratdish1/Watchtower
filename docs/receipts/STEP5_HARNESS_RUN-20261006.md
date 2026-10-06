@@ -1,6 +1,6 @@
 # Step 5 harness run — 2026-10-06
 
-**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC). Beacon and login close re-run: 2026-10-06 02:34 AM PDT (2026-10-06 09:34:17 UTC). Proxy-path close re-run: 2026-10-06 02:47 AM PDT (2026-10-06 09:47:55 UTC). Proxy-forward close re-run: 2026-10-06 03:05 AM PDT (2026-10-06 10:05:21 UTC). Canonical-target close re-run: 2026-10-06 03:24 AM PDT (2026-10-06 10:24:37 UTC).
+**Stamp:** 2026-10-05 10:56 PM PDT (2026-10-06 05:56:37 UTC). Memory-search auth re-run: 2026-10-05 11:03 PM PDT (2026-10-06 06:03:33 UTC). Operator-key close re-run: 2026-10-05 11:23 PM PDT (2026-10-06 06:23:20 UTC). Cookie and template-key close re-run: 2026-10-05 11:46 PM PDT (2026-10-06 06:46:18 UTC). Data-dir close re-run: 2026-10-06 02:14 AM PDT (2026-10-06 09:14:13 UTC). Beacon and login close re-run: 2026-10-06 02:34 AM PDT (2026-10-06 09:34:17 UTC). Proxy-path close re-run: 2026-10-06 02:47 AM PDT (2026-10-06 09:47:55 UTC). Proxy-forward close re-run: 2026-10-06 03:05 AM PDT (2026-10-06 10:05:21 UTC). Canonical-target close re-run: 2026-10-06 03:24 AM PDT (2026-10-06 10:24:37 UTC). Exact-action close re-run: 2026-10-06 03:31 AM PDT (2026-10-06 10:31:58 UTC).
 **Runner:** isolated CI/VM (this workspace). No live hosts.
 **Node:** `v22.14.0`
 **Paper:** `jratdish1/knowledge-base` `ops/vao-torch/tasks/VAO-TASK-20261002-STEP5-HARNESS-PAPER.md` (blob `0940f85c3d297b3ce9f9744e87795e3075d902ad`). `gh api repos/jratdish1/knowledge-base/contents/...` returned HTTP 404; the file was read through the authenticated contents API. Paper score at plant: 16 specified, 0 executed. This receipt is the run.
@@ -25,10 +25,12 @@
 | proxy-path commit | `ac8352e0547f0144d35915bd079b6b4d08e8d61c` |
 | prior tip (before proxy-forward functional close) | `4437a89348bab276b51e36b66e841ed81ddd9d5e` |
 | proxy-forward commit | `410915c0dfc098a0a79f481d2bc8dad7c85de45c` |
-| prior tip (before this close) | `465e9678d43ce1ad4d582a2e6f98b420cdb8fd4a` |
-| head (canonical-target commit) | `3a271f78f286f75f64d6e994a2384cb879d6f852` |
+| prior tip (before canonical-target close) | `465e9678d43ce1ad4d582a2e6f98b420cdb8fd4a` |
+| canonical-target commit | `3a271f78f286f75f64d6e994a2384cb879d6f852` |
+| prior tip (before this close) | `48a8f7565cb402c67ff4aefe088bbea98cfed9fb` |
+| head (exact-action commit) | `3c044984b5333df497141507d38c23a8e84095dd` |
 
-`head` is `3a271f78f286f75f64d6e994a2384cb879d6f852`, the commit that rejects a request target unless it is already canonical and forwards that same path and query. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
+`head` is `3c044984b5333df497141507d38c23a8e84095dd`, the commit that requires an exact socket action and an exact host. This line records that id. The pull request description repeats `git rev-parse HEAD` after the final push. A commit object cannot contain its own id.
 
 Working directory for every command: repository root.
 
@@ -37,8 +39,8 @@ Working directory for every command: repository root.
 | Command | Exit | Passed | Failed | Skipped |
 |---------|------|--------|--------|---------|
 | `node backend/test/allowlist.test.js` | 0 | 19 | 0 | 0 |
-| `node backend/test/auth.test.js` | 0 | 165 | 0 | 0 |
-| `node backend/test/c2-socket.test.js` | 0 | 17 | 0 | 0 |
+| `node backend/test/auth.test.js` | 0 | 166 | 0 | 0 |
+| `node backend/test/c2-socket.test.js` | 0 | 22 | 0 | 0 |
 | `node frontend/test/xss-static.test.js` | 0 | 11 | 0 | 0 |
 | `node frontend/test/csp-headers.test.js` | 0 | 34 | 0 | 0 |
 | `node frontend/test/ui-auth.test.js` | 0 | 213 | 0 | 0 |
@@ -46,7 +48,7 @@ Working directory for every command: repository root.
 
 Harness line: `STEP5_SUMMARY executed=16 blocked=0 passed=62 failed=0 skipped=0`
 
-Combined checks: **521 passed, 0 failed, 0 skipped.** Auth is 165 (startup refusal, trimmed key length, padded placeholders, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, beacon command delivered once, policy sync does not enroll, 253-character host cap, reserved host names, OTA signature required before apply, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 213. Step 5 is 62. Allowlist 19, socket 17, XSS 11.
+Combined checks: **527 passed, 0 failed, 0 skipped.** Auth is 166 (startup refusal, trimmed key length, padded placeholders, example-file key literals, repo-root `./data` from `backend/`, CGNAT, CORS, index 503, allowlist-off purge on a loaded map, auto-remediate host allowlist, beacon command delivered once, policy sync does not enroll, 253-character host cap, reserved host names, padded host rejected, OTA signature required before apply, OTA public base, core fail-start, repo data files unchanged). CSP is 34. `ui-auth.test.js` is 213. Step 5 is 62. Allowlist 19, socket 22, XSS 11.
 
 ## Step 5 matrix (16)
 
@@ -257,3 +259,9 @@ P0 was 0. The trailing-slash forward, the upgrade allow check, `Origin: null`, a
 | P2 logout redirects when the request fails | fixed | The Log out control assigns `/login` only when the logout response is ok. A failed response or a network error shows "Log out failed" and stays on the page. |
 | P2 lockout expiry clears the failure count | fixed | An expired lock keeps its failure count for 15 minutes. The next failure continues the backoff. Active locks are still not evicted, and a full map of active locks still answers 429. |
 | P2 `Referrer-Policy: no-referrer` | fixed | The Glass Pane sends `Referrer-Policy: strict-origin-when-cross-origin`. `Origin: null` stays 403 on a state-changing proxy POST, including when `Sec-Fetch-Site` is `same-origin`. A same-origin POST that sends `Origin` and no Referer still succeeds. |
+
+A padded socket action passed the allowlist and was queued as the original string. That is closed in `3c044984b5333df497141507d38c23a8e84095dd`.
+
+## Review thread 4194054106
+
+The socket action is an exact member of `quarantine`, `lock_dir`, `kill`, or `disable_user`. There is no trim and no case fold. A padded, mixed-case, or unicode-lookalike action is `invalid_c2_action` and is not queued. Host strings that gate the beacon, policy reassign, inventory ingest, and auto-remediate are the same exact value that was checked. A padded host is 400 and is not enrolled.
