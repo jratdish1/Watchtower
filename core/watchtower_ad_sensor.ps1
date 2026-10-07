@@ -8,7 +8,12 @@ Includes an outbound beacon for Command & Control (C2) to execute response actio
 
 $HubIP = "100.x.x.x" # Replace with Master Hub Tailscale/Mesh IP
 $HubApiPort = 3000
-$ApiKey = os.environ.get("WATCHTOWER_API_KEY", "WATCHTOWER_DEFAULT_KEY")
+$ApiKey = $env:WATCHTOWER_API_KEY
+$ApiKeyTrimmed = if ($null -eq $ApiKey) { '' } else { $ApiKey.Trim() }
+if ([string]::IsNullOrWhiteSpace($ApiKey) -or $ApiKeyTrimmed -in @('WATCHTOWER_DEFAULT_KEY', 'YOUR_SECRET_API_KEY_HERE', 'generate_a_secure_random_key_here') -or $ApiKeyTrimmed.Length -lt 32) {
+    Write-Error "[Watchtower] Refusing to start: WATCHTOWER_API_KEY is unset, empty, a public placeholder, or shorter than 32 characters."
+    exit 1
+}
 $Hostname = $env:COMPUTERNAME
 
 $IngestUrl = "http://${HubIP}:${HubApiPort}/api/v2/ingest/threat"
@@ -99,7 +104,7 @@ Function Send-Telemetry ($EventRecord) {
 Function Check-C2-Queue {
     # Outbound beaconing to check for commands (No inbound ports opened on the DC)
     try {
-        $Response = Invoke-RestMethod -Uri "$BeaconUrl?host=$Hostname" -Method Get -Headers @{"x-api-key"=$ApiKey} -TimeoutSec 5
+        $Response = Invoke-RestMethod -Uri "$BeaconUrl?host=$Hostname" -Method Post -Body '{}' -ContentType 'application/json' -Headers @{"x-api-key"=$ApiKey} -TimeoutSec 5
         if ($Response.commands) {
             foreach ($Cmd in $Response.commands) {
                 Write-Host "[!] C2 Command Received: $($Cmd.action) on $($Cmd.target)" -ForegroundColor Yellow

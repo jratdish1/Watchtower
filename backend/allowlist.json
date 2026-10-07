@@ -11,5 +11,6 @@
   "c2": {
     "destructive_actions": ["kill", "lock_dir", "quarantine", "disable_user"],
     "audit_blocked_actions": ["kill"]
-  }
+  },
+  "profile_capabilities": {}
 }

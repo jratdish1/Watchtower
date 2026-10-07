@@ -13,7 +13,10 @@ TOPIC_ID = os.environ.get("TELEGRAM_TOPIC_ID", "202")
 CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 
 WATCHTOWER_API_URL = os.environ.get("WATCHTOWER_API_URL", "http://127.0.0.1:3000") + "/api/v2/ingest/threat"
-WATCHTOWER_API_KEY = os.environ.get("WATCHTOWER_API_KEY", "WATCHTOWER_DEFAULT_KEY")
+import sys as _wt_sys
+_wt_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from operator_key import require_operator_key
+WATCHTOWER_API_KEY = require_operator_key()
 
 def load_state():
     if os.path.exists(STATE_FILE):

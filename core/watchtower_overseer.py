@@ -7,7 +7,10 @@ from datetime import datetime, timedelta
 
 WATCHTOWER_API = os.environ.get("WATCHTOWER_API_URL", "http://127.0.0.1:3000") + "/api/alerts"
 WATCHTOWER_INGEST = os.environ.get("WATCHTOWER_API_URL", "http://127.0.0.1:3000") + "/api/v2/ingest/fim"  # We can push updates here, or add a dedicated update endpoint
-API_KEY = os.environ.get("WATCHTOWER_API_KEY", "WATCHTOWER_DEFAULT_KEY")
+import sys as _wt_sys
+_wt_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from operator_key import require_operator_key
+API_KEY = require_operator_key()
 STALL_TIMEOUT_SECONDS = 15
 
 # We use the Micro model for fallback consistency checks

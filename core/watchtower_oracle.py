@@ -8,7 +8,10 @@ from collections import defaultdict
 
 # Watchtower Oracle - Deep Process & Network Telemetry
 API_URL = os.environ.get("WATCHTOWER_API_URL", "http://127.0.0.1:4040") + "/api/v2/ingest/threat"
-API_KEY = os.environ.get("WATCHTOWER_API_KEY", "WATCHTOWER_DEFAULT_KEY")
+import sys as _wt_sys
+_wt_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from operator_key import require_operator_key
+API_KEY = require_operator_key()
 HOSTNAME = os.uname().nodename if hasattr(os, 'uname') else "Local-Node"
 
 # Stateful baseline: { "process_name": { "ports": set(), "connections": 0 } }
