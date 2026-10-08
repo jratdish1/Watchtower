@@ -3,6 +3,8 @@
 // A16 honeypot binds loopback by default, refuses 0.0.0.0/hostnames/CIDR,
 //     and backs off (no CPU spin) when the port is taken.
 // A17 start.sh binds loopback by default and refuses all-interfaces binds.
+// A18 sensors observe only (audit) unless policy explicitly sets AUDIT_MODE false;
+//     an edge that cannot reach the hub must never kill processes or quarantine files.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -110,6 +112,76 @@ if (res) {
   check('A16 env 0.0.0.0 does not bind', res.env_any === 'error', res.env_any);
   check('A16 daemon backs off on bind error (sleep called)', res.backoff_calls >= 3, String(res.backoff_calls));
   check('A16 backoff is >= 30s per retry', Number(res.backoff_sec) >= 30, String(res.backoff_sec));
+}
+
+// ---- A18 (runtime, python) ----
+const a18 = `
+import importlib.util, json, os, sys, tempfile, re
+root = sys.argv[1]
+os.environ["WATCHTOWER_API_KEY"] = "a18-test-only-key-not-a-secret-0123456789abcdef"
+os.environ["WATCHTOWER_API_URL"] = "http://127.0.0.1:9"
+os.environ["WATCHTOWER_DATA_DIR"] = tempfile.mkdtemp()
+os.environ.pop("WATCHTOWER_AUDIT_MODE", None)
+spec = importlib.util.spec_from_file_location("bc", os.path.join(root, "core", "watchtower_beacon.py"))
+bc = importlib.util.module_from_spec(spec); spec.loader.exec_module(bc)
+out = {}
+out["fallback"] = bc.sync_policy().get("WATCHTOWER_AUDIT_MODE")
+cases = {"missing": {}, "bool_false": {"WATCHTOWER_AUDIT_MODE": False}, "str_false": {"WATCHTOWER_AUDIT_MODE": "false"},
+         "str_False_pad": {"WATCHTOWER_AUDIT_MODE": " False "}, "bool_true": {"WATCHTOWER_AUDIT_MODE": True},
+         "str_yes": {"WATCHTOWER_AUDIT_MODE": "yes"}, "str_0": {"WATCHTOWER_AUDIT_MODE": "0"},
+         "none": {"WATCHTOWER_AUDIT_MODE": None}, "empty": {"WATCHTOWER_AUDIT_MODE": ""}}
+if hasattr(bc, "audit_mode_env"):
+    out["env"] = {k: bc.audit_mode_env(v) for k, v in cases.items()}
+    out["env"]["not_dict"] = bc.audit_mode_env(["x"])
+else:
+    out["env"] = {k: "MISSING" for k in list(cases) + ["not_dict"]}
+captured = []
+class FakeP:
+    def poll(self): return None
+def fake_popen(args, env=None, **kw):
+    captured.append(env.get("WATCHTOWER_AUDIT_MODE")); return FakeP()
+bc.subprocess.Popen = fake_popen
+os.environ["WATCHTOWER_AUDIT_MODE"] = "false"   # hostile outer env must not leak through
+bc.RUNNING_SENSORS.clear(); bc.manage_sensors({"ENABLE_FIM": True})
+out["popen_missing_key"] = captured[-1] if captured else None
+bc.RUNNING_SENSORS.clear(); bc.manage_sensors({"ENABLE_FIM": True, "WATCHTOWER_AUDIT_MODE": False})
+out["popen_explicit_false"] = captured[-1] if captured else None
+os.environ.pop("WATCHTOWER_AUDIT_MODE", None)
+out["sensors"] = {}
+for name in ("watchtower_fim.py", "watchtower_behavioral.py"):
+    src = open(os.path.join(root, "core", name)).read()
+    line = [l for l in src.splitlines() if l.startswith("AUDIT_MODE =")]
+    res = {}
+    for label, val in (("unset", None), ("false", "false"), ("FALSE", "FALSE"), ("true", "true"), ("empty", ""), ("junk", "maybe")):
+        if val is None: os.environ.pop("WATCHTOWER_AUDIT_MODE", None)
+        else: os.environ["WATCHTOWER_AUDIT_MODE"] = val
+        ns = {"os": os}
+        exec(line[0], ns) if line else None
+        res[label] = ns.get("AUDIT_MODE")
+    out["sensors"][name] = res
+print(json.dumps(out))
+`;
+const ra = spawnSync(py, ['-c', a18, ROOT], { encoding: 'utf8', timeout: 30000, cwd: path.join(ROOT, 'core') });
+let a = null;
+try { a = JSON.parse((ra.stdout || '').trim().split('\n').pop()); } catch (e) { /* ignore */ }
+check('A18 python probe ran', !!a, (ra.stderr || '').slice(-300));
+if (a) {
+  check('A18 hub-unreachable fallback policy is audit', a.fallback === true, String(a.fallback));
+  const expectFalse = new Set(['bool_false', 'str_false', 'str_False_pad']);
+  for (const [k, v] of Object.entries(a.env)) {
+    const want = expectFalse.has(k) ? 'false' : 'true';
+    check(`A18 audit_mode_env(${k}) = ${want}`, v === want, v);
+  }
+  check('A18 sensor env is audit when policy omits the key (outer env ignored)', a.popen_missing_key === 'true', String(a.popen_missing_key));
+  check('A18 sensor env honors explicit false', a.popen_explicit_false === 'false', String(a.popen_explicit_false));
+  for (const [name, r] of Object.entries(a.sensors)) {
+    check(`A18 ${name} unset env -> audit`, r.unset === true, String(r.unset));
+    check(`A18 ${name} "false" -> active`, r.false === false, String(r.false));
+    check(`A18 ${name} "FALSE" -> active`, r.FALSE === false, String(r.FALSE));
+    check(`A18 ${name} "true" -> audit`, r.true === true, String(r.true));
+    check(`A18 ${name} "" -> audit`, r.empty === true, String(r.empty));
+    check(`A18 ${name} junk -> audit`, r.junk === true, String(r.junk));
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

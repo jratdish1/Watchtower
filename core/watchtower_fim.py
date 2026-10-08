@@ -22,7 +22,8 @@ API_KEY = require_operator_key()
 HOSTNAME = os.uname().nodename if hasattr(os, 'uname') else "Local-Node"
 SIGNATURES_FILE = os.environ.get("WATCHTOWER_DATA_DIR", "../data") + "/signatures.json"
 WHITELIST_FILE = os.environ.get("WATCHTOWER_DATA_DIR", "../data") + "/whitelist.json"
-AUDIT_MODE = os.environ.get("WATCHTOWER_AUDIT_MODE", "false").lower() == "true"
+# A18: audit (observe only) unless explicitly set to "false".
+AUDIT_MODE = os.environ.get("WATCHTOWER_AUDIT_MODE", "true").strip().lower() != "false"
 
 SIGNATURE_CACHE = set()
 WHITELIST_CACHE = {"paths": [], "hashes": []}
@@ -82,7 +83,7 @@ HVT_PATHS = [
     os.path.expanduser("~/Documents"),
     os.path.expanduser("~/Desktop"),
     os.environ.get("WATCHTOWER_TARGET_DIR", "./data"),  # Sandbox tests
-    "/etc", 
+    "/etc",
     "/usr/local/bin"
 ]
 
@@ -119,21 +120,21 @@ def is_noisy(filepath):
     """Filters out mass system background noise relying heavily on High Risk Whitelisting."""
     filename = os.path.basename(filepath).lower()
     if filename.startswith('.'): return True
-    
+
     for idir in IGNORED_DIRS:
         if f"/{idir}/" in filepath or filepath.endswith(f"/{idir}"): return True
 
     for ext in IGNORED_EXTS:
         if filename.endswith(ext): return True
-        
+
     # Throttle: Only scan files with no extension (Linux/Mac binaries) or explicit risk extensions
     _, ext = os.path.splitext(filename)
     if not ext:
         return False # No extension, might be an ELF or Mach-O executable
-        
+
     if ext in RISK_EXTS:
         return False
-        
+
     # Ignore all other generic document/media/settings files to save AI compute
     return True
 
@@ -141,14 +142,14 @@ def push_to_queue(event_type, filepath):
     if filepath.endswith("signatures.json") or filepath.endswith("whitelist.json"):
         reload_caches()
         return
-        
+
     if is_noisy(filepath): return
-    
+
     # --- TEMPORAL RATE LIMITER (DOS Debouncer) ---
     with throttle_lock:
         now = time.time()
         last_time, counter = debounce_log.get(filepath, (0, 0))
-        
+
         if now - last_time < DEBOUNCE_WINDOW_SEC:
             counter += 1
             debounce_log[filepath] = (now, counter)
@@ -156,25 +157,25 @@ def push_to_queue(event_type, filepath):
                 return # Hard-Drop redundant hits natively to securely protect LM Studio
         else:
             debounce_log[filepath] = (now, 1)
-    
+
     phash = get_file_hash(filepath)
     if is_whitelisted(filepath, phash): return
-    
+
     alert_queue.put((event_type, filepath, phash))
 
 def _process_and_alert(event_type, filepath, phash):
     print(f"[*] FSEvent Triggered: {event_type} on {filepath}")
-    
+
     # 1. Immediate Initial Alert (Status: Pending Analysis)
     data_pending = json.dumps({
         "source": HOSTNAME,
         "file_path": filepath,
         "event_type": event_type,
-        "severity": "medium", 
+        "severity": "medium",
         "ai_verdict": "ANALYZING...",
         "ai_reason": "Sent to Sovereign Cognitive Queue..."
     }).encode('utf-8')
-    
+
     try:
         req_pending = urllib.request.Request(API_URL, data=data_pending, headers={'Content-Type': 'application/json', 'x-api-key': API_KEY})
         urllib.request.urlopen(req_pending)
@@ -183,7 +184,7 @@ def _process_and_alert(event_type, filepath, phash):
 
     # 2. Local AI & Signature Analysis Call
     is_known_bad = check_deterministic_signature(filepath, phash) if event_type != "FILE_DELETED" else False
-    
+
     if is_known_bad:
         verdict = "MALICIOUS"
         reason = "Match against deterministic threat signature."
@@ -200,9 +201,9 @@ def _process_and_alert(event_type, filepath, phash):
         ai_res = watchtower_ai_bridge.analyze_file(event_type, filepath, entropy=ent)
         verdict = ai_res.get("verdict", "UNKNOWN")
         reason = ai_res.get("reason", "No reason provided")
-        
+
     severity = "high" if verdict in ["MALICIOUS", "SUSPICIOUS"] else "low"
-    
+
     # 3. Final Enriched Alert
     data_final = json.dumps({
         "source": HOSTNAME,
@@ -212,7 +213,7 @@ def _process_and_alert(event_type, filepath, phash):
         "ai_verdict": verdict,
         "ai_reason": reason
     }).encode('utf-8')
-    
+
     try:
         req_final = urllib.request.Request(API_URL, data=data_final, headers={'Content-Type': 'application/json', 'x-api-key': API_KEY})
         urllib.request.urlopen(req_final)
@@ -234,7 +235,7 @@ class WatchtowerEventHandler(FileSystemEventHandler):
 def main():
     observer = Observer()
     event_handler = WatchtowerEventHandler()
-    
+
     # Attach watchdogs to all existing critical OS paths
     active_monitors = 0
     for path in HVT_PATHS:
@@ -245,7 +246,7 @@ def main():
                 active_monitors += 1
             except Exception as e:
                 print(f"[!] Warning: Cannot monitor {path} - {e}")
-    
+
     if active_monitors == 0:
         print("[!] Fatal: No valid High-Value Targets (HVT) found to monitor. Exiting.")
         return

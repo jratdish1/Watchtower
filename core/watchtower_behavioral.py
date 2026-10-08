@@ -10,7 +10,8 @@ _wt_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from operator_key import require_operator_key
 API_KEY = require_operator_key()
 HOSTNAME = os.uname().nodename if hasattr(os, 'uname') else "Local-Node"
-AUDIT_MODE = os.environ.get("WATCHTOWER_AUDIT_MODE", "false").lower() == "true"
+# A18: audit (observe only) unless explicitly set to "false".
+AUDIT_MODE = os.environ.get("WATCHTOWER_AUDIT_MODE", "true").strip().lower() != "false"
 
 # Living off the Land (LotL) Indicators of Attack (IOA)
 IOA_RULES = {
@@ -28,39 +29,39 @@ def analyze_process_behavior():
             if not cmd and not exe: continue
 
             matched_rule = None
-            
+
             # Rule 1: Encoded shells
             if "powershell" in name.lower() or "pwsh" in name.lower() or "bash" in name.lower() or "sh" in name.lower():
                 if any(x in cmd for x in IOA_RULES["encoded_shell"]):
                     matched_rule = "Encoded Shell Pipeline (Possible Memory Injection / C2)"
-                    
+
             # Rule 2: Web downloading to execution
             if any(x in cmd for x in ["curl ", "wget "]) and ("| bash" in cmd or "| sh" in cmd):
                 matched_rule = "Web-To-Execution Pipeline (LotL)"
-                
+
             # Rule 3: Execution from highly suspicious temp paths
             if any(exe.startswith(x) for x in IOA_RULES["suspicious_paths"]):
                 matched_rule = "Execution from Unbacked Temp Directory"
 
             if matched_rule:
                 print(f"[!] BEHAVIORAL IOA TRIGGERED: PID {p.info['pid']} ({name}) -> {matched_rule}")
-                
+
                 payload = {
                     "source": HOSTNAME,
                     "event_type": "BEHAVIORAL_ANOMALY",
                     "title": f"LotL Behavior Blocked: {name}",
-                    "file_path": exe or cmd, 
+                    "file_path": exe or cmd,
                     "ai_verdict": "MALICIOUS",
                     "ai_reason": f"Heuristic Rule Match: {matched_rule}. Command: {cmd}",
                     "severity": "high"
                 }
-                
+
                 try:
                     req = urllib.request.Request(API_URL, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json', 'x-api-key': API_KEY})
                     urllib.request.urlopen(req, timeout=5)
                 except Exception as e:
                     pass
-                
+
                 if not AUDIT_MODE:
                     print(f"[*] Terminating anomalous process {p.info['pid']}...")
                     p.terminate()

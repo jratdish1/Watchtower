@@ -45,8 +45,16 @@ def sync_policy():
         return {
             "ENABLE_FIM": True, "ENABLE_ORACLE": True, "ENABLE_BEHAVIORAL": True, "ENABLE_DECOY": True,
             "ENABLE_COMPLIANCE": True, "ENABLE_ROLLBACK": True, "ENABLE_YARA": True, "ENABLE_NDR": True,
-            "WATCHTOWER_AUDIT_MODE": False
+            # A18: hub unreachable and no cached policy -> observe only, never kill/quarantine.
+            "WATCHTOWER_AUDIT_MODE": True
         }
+
+def audit_mode_env(policy):
+    """A18: 'false' only when policy says exactly false; anything else is audit."""
+    value = policy.get("WATCHTOWER_AUDIT_MODE", True) if isinstance(policy, dict) else True
+    if value is False or str(value).strip().lower() == "false":
+        return "false"
+    return "true"
 
 def manage_sensors(policy):
     target_sensors = []
@@ -58,21 +66,21 @@ def manage_sensors(policy):
     if str(policy.get("ENABLE_ROLLBACK")).lower() == "true": target_sensors.append("watchtower_rollback.py")
     if str(policy.get("ENABLE_YARA")).lower() == "true": target_sensors.append("watchtower_regex_sweeper.py")
     if str(policy.get("ENABLE_NDR")).lower() == "true": target_sensors.append("watchtower_ndr.py")
-    
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    
+
     for s in target_sensors:
         if s not in RUNNING_SENSORS or RUNNING_SENSORS[s].poll() is not None:
             print(f"[Supervisor] Booting {s}...")
             env = os.environ.copy()
-            if "WATCHTOWER_AUDIT_MODE" in policy:
-                env["WATCHTOWER_AUDIT_MODE"] = str(policy["WATCHTOWER_AUDIT_MODE"]).lower()
+            # A18: active response only when policy explicitly sets AUDIT_MODE false.
+            env["WATCHTOWER_AUDIT_MODE"] = audit_mode_env(policy)
             script_path = os.path.join(script_dir, s)
             try:
                 RUNNING_SENSORS[s] = subprocess.Popen([sys.executable, script_path], env=env)
             except Exception as e:
                 print(f"[Supervisor] Critical Failure booting {s}: {e}")
-                
+
 
     for s in list(RUNNING_SENSORS.keys()):
         if s not in target_sensors:
@@ -119,7 +127,7 @@ def execute_local_quarantine(action, target, hmac_sig=None):
                 data = json.load(f)
         except:
             data = {"bad_hashes": []}
-            
+
         if target not in data.get("bad_hashes", []):
             if "bad_hashes" not in data: data["bad_hashes"] = []
             data["bad_hashes"].append(target)
@@ -148,22 +156,22 @@ def execute_local_quarantine(action, target, hmac_sig=None):
                 return
 
             print("[+] OTA payload signature verified")
-            
+
             with zipfile.ZipFile(payload_path, 'r') as zip_ref:
                 zip_ref.extractall(os.path.dirname(os.path.abspath(__file__)))
-                
+
             os.remove(payload_path)
-            
+
             print("[*] Update extracted. Restarting Watchtower core...")
             os.execv(sys.executable, ['python3'] + sys.argv)
-            
+
         except Exception as e:
             print(f"[!] OTA Update Failed: {e}")
         return
 
     script_dir = os.path.dirname(__file__)
     quarantine_script = os.path.join(script_dir, "watchtower_quarantine.py")
-    
+
     try:
         result = subprocess.run(
             ["python3", quarantine_script, "--action", action, "--target", target],
@@ -172,8 +180,8 @@ def execute_local_quarantine(action, target, hmac_sig=None):
         output = result.stdout.strip() or result.stderr.strip()
         print(f"[C2 Execution Result]: {output}")
         # In a fully armed system, we would push this 'output' array back to 4040
-        # so the Command Center knows the beacon executed it successfully. 
-        # (This is implicitly captured if the process goes offline or file disappears, 
+        # so the Command Center knows the beacon executed it successfully.
+        # (This is implicitly captured if the process goes offline or file disappears,
         # but a direct response loop is robust).
     except Exception as e:
         print(f"[-] Subprocess failure: {e}")
@@ -182,7 +190,7 @@ if __name__ == "__main__":
     print(f"[Watchtower Beacon + Supervisor] Agent {HOSTNAME} securely bound to C2 Hub: {API_URL}")
     current_policy = sync_policy()
     manage_sensors(current_policy)
-    
+
     try:
         while True:
             check_beacon()
