@@ -78,7 +78,7 @@ elseif ($NodeType -eq "2") {
     New-Item -ItemType Directory -Force -Path "data/quarantine" | Out-Null
     
     Write-Host "`n============================================" -ForegroundColor Green
-    Write-Host "Edge Setup Complete! Run .\start-agent.bat to start the Watchtower Node."
+    Write-Host "Edge Setup Complete! Run .\start.bat to start the Watchtower Node (it reads NODE_TYPE from .env)."
     Write-Host "============================================" -ForegroundColor Green
 }
 else {

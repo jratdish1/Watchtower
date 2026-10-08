@@ -8,7 +8,7 @@ This standalone toolkit provides completely harmless, synthetic replicas of mali
 
 ## Local Execution Instructions
 
-1. **Boot Watchtower**: Ensure the central Hub components are running, and boot an edge node utilizing `./start-agent.sh`. Ensure all subsystem policies (Behavioral, NDR, Decoy, FIM) are enabled dynamically via the UI Policy manager.
+1. **Boot Watchtower**: Ensure the central Hub components are running, and boot an edge node utilizing `./start.sh` with `NODE_TYPE=EDGE` in `.env`. Ensure all subsystem policies (Behavioral, NDR, Decoy, FIM) are enabled dynamically via the UI Policy manager.
 2. **Open Dashboard**: Keep `http://localhost:8080` open on your screen to visualize the telemetry streaming live.
 3. In a separate native terminal window, navigate into this safe directory: `cd tests_simulators/`.
 4. Execute the simulation architectures:
