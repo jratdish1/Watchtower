@@ -76,7 +76,8 @@ function runStart(supervised) {
 const sup = runStart(true);
 check('A20 supervised: beacon launched', /watchtower_beacon\.py/.test(sup.launched), sup.launched);
 check('A20 supervised: resurrection NOT launched', !/watchtower_resurrection\.py/.test(sup.launched), sup.launched);
-check('A20 supervised: start.sh exits 0', sup.r.status === 0, String(sup.r.status));
+// A25: shims exit at once; under supervision a dead child must end start.sh non-zero (service manager restarts).
+check('A20/A25 supervised: dead children -> start.sh exits 1', sup.r.status === 1, String(sup.r.status));
 const man = runStart(false);
 check('A20 manual run: beacon launched', /watchtower_beacon\.py/.test(man.launched), man.launched);
 check('A20 manual run: resurrection still launched', /watchtower_resurrection\.py/.test(man.launched), man.launched);
