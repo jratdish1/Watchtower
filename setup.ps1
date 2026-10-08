@@ -35,7 +35,10 @@ if ($NodeType -eq "1") {
         python -m venv .venv
     }
     & ".\.venv\Scripts\Activate.ps1"
-    pip install -r requirements.txt --no-deps
+    # A26: hash-locked install. Fail closed on a missing lock or bad hash.
+    if (-not (Test-Path "requirements.txt")) { Write-Host "[!] requirements.txt missing. Re-clone at a reviewed SHA." -ForegroundColor Red; Exit 1 }
+    pip install --require-hashes -r requirements.txt
+    if ($LASTEXITCODE -ne 0) { Write-Host "[!] Python dependency install failed (hash check)." -ForegroundColor Red; Exit 1 }
     
     Write-Host "Installing Node.js C2 Hub Components..." -ForegroundColor Yellow
     Set-Location backend
@@ -67,7 +70,10 @@ elseif ($NodeType -eq "2") {
         python -m venv .venv
     }
     & ".\.venv\Scripts\Activate.ps1"
-    pip install -r requirements.txt --no-deps
+    # A26: hash-locked install. Fail closed on a missing lock or bad hash.
+    if (-not (Test-Path "requirements.txt")) { Write-Host "[!] requirements.txt missing. Re-clone at a reviewed SHA." -ForegroundColor Red; Exit 1 }
+    pip install --require-hashes -r requirements.txt
+    if ($LASTEXITCODE -ne 0) { Write-Host "[!] Python dependency install failed (hash check)." -ForegroundColor Red; Exit 1 }
     
     New-Item -ItemType Directory -Force -Path "data/quarantine" | Out-Null
     

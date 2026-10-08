@@ -50,3 +50,11 @@ jobs:
         run: node frontend/test/step5-harness.test.js
       - name: IR P3 hardening (percent-encoding, action case, cookie opt-out)
         run: node frontend/test/ir-p3-hardening.test.js
+      - name: Install hash-locked Python deps (A26)
+        run: |
+          python3 -m venv /tmp/wt-venv
+          /tmp/wt-venv/bin/pip install --disable-pip-version-check --require-hashes -r requirements.txt
+      - name: A26 Python deps hash-lock, vuln floors, paramiko 5 live SSH
+        env:
+          WT_PY: /tmp/wt-venv/bin/python
+        run: node backend/test/python-deps.test.js

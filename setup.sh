@@ -27,19 +27,12 @@ if [ "$NODE_TYPE" == "1" ]; then
     
     python3 -m venv .venv
     source .venv/bin/activate
+    # A26: hash-locked install. Fail closed if the lock file is missing.
     if [ ! -f requirements.txt ]; then
-        cat << REQ > requirements.txt
-watchdog==6.0.0
-psutil==7.2.2
-sentence-transformers==3.4.1
-lancedb==0.17.0
-numpy==1.26.4
-pyarrow==19.0.0
-REQ
-    else
-        grep -q "psutil" requirements.txt || echo "psutil==7.2.2" >> requirements.txt
+        echo -e "\033[1;31m[!] requirements.txt missing. Re-clone the repo at a reviewed SHA.\033[0m"
+        exit 1
     fi
-    pip install -r requirements.txt --no-deps
+    pip install --require-hashes -r requirements.txt || { echo -e "\033[1;31m[!] Python dependency install failed (hash check).\033[0m"; exit 1; }
     
     echo "[Watchtower] Installing Node.js C2 Hub Components..."
     cd backend && npm ci --ignore-scripts && cd ..
@@ -66,19 +59,12 @@ elif [ "$NODE_TYPE" == "2" ]; then
     
     python3 -m venv .venv
     source .venv/bin/activate
+    # A26: hash-locked install. Fail closed if the lock file is missing.
     if [ ! -f requirements.txt ]; then
-        cat << REQ > requirements.txt
-watchdog==6.0.0
-psutil==7.2.2
-sentence-transformers==3.4.1
-lancedb==0.17.0
-numpy==1.26.4
-pyarrow==19.0.0
-REQ
-    else
-        grep -q "psutil" requirements.txt || echo "psutil==7.2.2" >> requirements.txt
+        echo -e "\033[1;31m[!] requirements.txt missing. Re-clone the repo at a reviewed SHA.\033[0m"
+        exit 1
     fi
-    pip install -r requirements.txt --no-deps
+    pip install --require-hashes -r requirements.txt || { echo -e "\033[1;31m[!] Python dependency install failed (hash check).\033[0m"; exit 1; }
     mkdir -p data/quarantine
     
     echo ""
