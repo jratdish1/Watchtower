@@ -5,6 +5,7 @@ import argparse
 import psutil
 import platform
 import subprocess
+import ipaddress
 from urllib.parse import urlparse
 
 QUARANTINE_DIR = os.environ.get("WATCHTOWER_DATA_DIR", "../data") + "/security/quarantine"
@@ -44,10 +45,33 @@ def lock_directory(filepath):
     except Exception as e:
         return f"[-] Failed to lock directory: {e}"
 
-def isolate_network(hub_url):
+def parse_hub_ip(hub_url):
+    """Return the hub as a single IP address string, or None.
+
+    The value goes into pf rules, iptables, and netsh. Only a single IP
+    literal is accepted: no hostnames, no CIDR ranges, no whitespace or
+    newlines (a newline would inject extra pf rules; 0.0.0.0/0 would
+    turn isolation off).
+    """
+    raw = str(hub_url or "").strip()
+    if not raw or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in raw):
+        return None
+    if "://" in raw:
+        host = urlparse(raw).hostname
+    else:
+        host = raw
+    if not host:
+        return None
     try:
-        parsed_url = urlparse(hub_url)
-        hub_ip = parsed_url.hostname or hub_url
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return None
+
+def isolate_network(hub_url):
+    hub_ip = parse_hub_ip(hub_url)
+    if hub_ip is None:
+        return "[-] Refused network isolation: target must be a single hub IP address (or http(s)://IP[:port])."
+    try:
         os_sys = platform.system()
         
         if os_sys == "Darwin":
