@@ -1,0 +1,16 @@
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const src = fs.readFileSync(path.join(__dirname, '..', '..', 'core', 'watchtower_ad_sensor.ps1'), 'utf8');
+let pass = 0, fail = 0;
+const check = (name, ok) => { if (ok) pass++; else { fail++; console.error('FAIL ' + name); } };
+const guard = src.indexOf('exit 1');
+const assign = src.search(/^\$ApiKey\s*=\s*\$ApiKeyTrimmed\s*$/m);
+check('trimmed key is assigned to $ApiKey', assign !== -1);
+check('assignment comes after the refuse-to-start guard', assign > guard && guard !== -1);
+const firstUse = src.indexOf('"x-api-key"=$ApiKey');
+check('x-api-key header uses $ApiKey', firstUse !== -1);
+check('header use comes after the trim assignment', firstUse > assign);
+check('no header sends the raw env var', !/"x-api-key"\s*=\s*\$env:/i.test(src));
+console.log(pass + ' passed, ' + fail + ' failed');
+process.exit(fail ? 1 : 0);
