@@ -15,9 +15,11 @@ jobs:
         with:
           node-version: '22'
       - name: Install backend dependencies
-        run: npm ci --prefix backend
+        run: npm ci --ignore-scripts --prefix backend
       - name: Install frontend dependencies
-        run: npm ci --prefix frontend
+        run: npm ci --ignore-scripts --prefix frontend
+      - name: No dependency install scripts (A14)
+        run: node backend/test/no-install-scripts.test.js
       - name: Allowlist adapter
         run: node backend/test/allowlist.test.js
       - name: SSH scraper host-key policy (static)
