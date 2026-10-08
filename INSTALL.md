@@ -11,8 +11,8 @@ If you are a system administrator or power user looking to install Watchtower on
 2. Ensure you have **Python 3.10+** installed on your system.
 3. Double-click `setup.bat`. This will bypass execution policies locally and launch the setup loop natively in PowerShell.
 4. Select `1` for Hub or `2` for Edge Sensor.
-5. If you configured a Master Hub, ensure you run `npm install` inside `/backend` and `/frontend`.
-6. Double-click `start.bat` (for Hubs) or `start-agent.bat` (for Edge nodes). 
+5. If you configured a Master Hub, run `npm ci --ignore-scripts` inside `/backend` and `/frontend`.
+6. Double-click `start.bat` (it reads `NODE_TYPE` from `.env` for Hub or Edge).
 
 ### Mac & Linux Users
 1. Open a terminal and navigate to this repository.
@@ -23,7 +23,9 @@ chmod +x setup.sh
 ./setup.sh
 ```
 4. Follow the interactive CLI to generate your cryptographic `.env` topology.
-5. To boot the system, execute `./start.sh` (Hubs) or `./start-agent.sh` (Edge nodes).
+5. To boot the system, execute `./start.sh` (it reads `NODE_TYPE` from `.env` for Hub or Edge).
+6. Network: `start.sh` binds the API to `127.0.0.1` unless `WATCHTOWER_BIND_ADDRESS` names one interface, and refuses `0.0.0.0` (use the Tailscale IP for a fleet hub). The honeypot binds `WATCHTOWER_HONEYPOT_BIND` (default `127.0.0.1`).
+7. Updates: `secure_update.sh` refuses to run (no real signature check yet). Update by checking out an exact reviewed SHA - see the header of that script.
 
 ---
 
