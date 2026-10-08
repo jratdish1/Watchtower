@@ -20,4 +20,6 @@ def require_operator_key(name="WATCHTOWER_API_KEY"):
             + " is unset, empty, a public placeholder, or shorter than 32 characters.\n"
         )
         raise SystemExit(1)
-    return raw
+    # Return the stripped value: the value validated above is the value every
+    # compare and x-api-key header uses (padded/CRLF env values no longer 401).
+    return stripped
