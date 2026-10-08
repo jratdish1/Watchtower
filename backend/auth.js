@@ -96,11 +96,14 @@ function operatorKeyProblem(raw) {
 
 /**
  * Accept a private operator key or exit non-zero.
+ * Returns the key trimmed once at load, so the value checked here is the
+ * value every compare uses (a padded or CRLF-terminated env value no longer
+ * passes startup and then 401s at request time).
  * The message names the problem and never prints the key.
  */
 function requireOperatorKey(raw) {
   const problem = operatorKeyProblem(raw);
-  if (!problem) return String(raw);
+  if (!problem) return String(raw).trim();
   const why = {
     unset: 'WATCHTOWER_API_KEY is unset',
     empty: 'WATCHTOWER_API_KEY is empty',

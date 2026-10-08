@@ -20,6 +20,8 @@ jobs:
         run: node backend/test/allowlist.test.js
       - name: Operator API auth and purge cap
         run: node backend/test/auth.test.js
+      - name: Operator key trim at load
+        run: node backend/test/operator-key-trim.test.js
       - name: Socket c2 guard
         run: node backend/test/c2-socket.test.js
       - name: FE XSS static guard
