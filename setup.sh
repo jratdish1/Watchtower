@@ -17,12 +17,8 @@ if [ "$NODE_TYPE" == "1" ]; then
     echo ""
     echo -e "\033[1;32m[+] Initializing Master Hub Architecture...\033[0m"
     KEY=$(openssl rand -hex 24)
-    LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
-    
+    # A22: the hub's own beacon talks to its API on loopback; keep WATCHTOWER_API_URL.
     sed -i.bak "s/generate_a_secure_random_key_here/$KEY/g" .env
-    if [ "$LOCAL_IP" != "127.0.0.1" ] && [ -n "$LOCAL_IP" ]; then
-        sed -i.bak "s|http://127.0.0.1:4040|http://$LOCAL_IP:4040|g" .env
-    fi
     rm -f .env.bak
     
     echo "NODE_TYPE=HUB" >> .env

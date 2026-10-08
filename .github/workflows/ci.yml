@@ -40,6 +40,8 @@ jobs:
         run: node backend/test/deploy-defaults.test.js
       - name: Service owner and edge install path (A19-A20)
         run: node backend/test/service-owner.test.js
+      - name: Hub API URL reachable by sensors (A22)
+        run: node backend/test/api-url.test.js
       - name: Glass Pane security headers
         run: node frontend/test/csp-headers.test.js
       - name: Glass Pane operator session
