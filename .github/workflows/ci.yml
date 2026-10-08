@@ -20,6 +20,8 @@ jobs:
         run: npm ci --prefix frontend
       - name: Allowlist adapter
         run: node backend/test/allowlist.test.js
+      - name: SSH scraper host-key policy (static)
+        run: node backend/test/ssh-host-key-policy.test.js
       - name: Operator API auth and purge cap
         run: node backend/test/auth.test.js
       - name: Operator key trim at load

@@ -27,7 +27,14 @@ def scrape_switch(host, username, password):
         return None
         
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # Fail closed on unknown host keys (no trust-on-first-use, no MITM).
+    # Known keys come from the system known_hosts, plus an optional
+    # WATCHTOWER_SSH_KNOWN_HOSTS file for switch fingerprints.
+    client.load_system_host_keys()
+    extra_known_hosts = os.environ.get("WATCHTOWER_SSH_KNOWN_HOSTS")
+    if extra_known_hosts and os.path.isfile(extra_known_hosts):
+        client.load_host_keys(extra_known_hosts)
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
     try:
         client.connect(host, username=username, password=password, timeout=10)
         # Compatible with Cisco, Aruba, etc.
