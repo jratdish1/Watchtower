@@ -22,15 +22,9 @@ if ($NodeType -eq "1") {
     [Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($Bytes)
     $Key = -join ($Bytes | ForEach-Object { $_.ToString("x2") })
     
-    # Get Local IP
-    $LocalIp = (Test-Connection -ComputerName (hostname) -Count 1).IPV4Address.IPAddressToString
-    if ([string]::IsNullOrWhiteSpace($LocalIp)) { $LocalIp = "127.0.0.1" }
-    
+    # A22: the hub's own beacon talks to its API on loopback; keep WATCHTOWER_API_URL.
     $EnvContent = Get-Content ".env"
     $EnvContent = $EnvContent -replace "generate_a_secure_random_key_here", $Key
-    if ($LocalIp -ne "127.0.0.1") {
-        $EnvContent = $EnvContent -replace "http://127.0.0.1:4040", "http://$LocalIp:4040"
-    }
     $EnvContent | Set-Content ".env"
     Add-Content -Path ".env" -Value "`nNODE_TYPE=HUB"
     
@@ -78,7 +72,7 @@ elseif ($NodeType -eq "2") {
     New-Item -ItemType Directory -Force -Path "data/quarantine" | Out-Null
     
     Write-Host "`n============================================" -ForegroundColor Green
-    Write-Host "Edge Setup Complete! Run .\start-agent.bat to start the Watchtower Node."
+    Write-Host "Edge Setup Complete! Run .\start.bat to start the Watchtower Node (it reads NODE_TYPE from .env)."
     Write-Host "============================================" -ForegroundColor Green
 }
 else {

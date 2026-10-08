@@ -8,7 +8,8 @@ SERVICE_NAME="watchtower"
 DESC="Watchtower Sovereign EDR Hub"
 
 if [ "$1" == "--agent" ]; then
-    TARGET_SCRIPT="start-agent.sh"
+    # A19: start.sh reads NODE_TYPE from .env; there is no separate agent script.
+    TARGET_SCRIPT="start.sh"
     SERVICE_NAME="watchtower-agent"
     DESC="Watchtower Sentinel Edge Node"
 fi
@@ -28,6 +29,11 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     <array>
         <string>$DIR/$TARGET_SCRIPT</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>WATCHTOWER_SUPERVISED</key>
+        <string>1</string>
+    </dict>
     <key>WorkingDirectory</key>
     <string>$DIR</string>
     <key>RunAtLoad</key>
@@ -56,6 +62,7 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$DIR
+Environment=WATCHTOWER_SUPERVISED=1
 ExecStart=$DIR/$TARGET_SCRIPT
 Restart=on-failure
 RestartSec=5

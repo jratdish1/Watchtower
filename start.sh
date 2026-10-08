@@ -46,9 +46,15 @@ else
     exit 1
 fi
 
-echo "[Watchtower] Engaging Kernel-Level Resurrection Watchdog..."
-python3 watchtower_resurrection.py &
-PIDS="$PIDS $!"
+# A20: one restart owner. Under systemd/launchd (install_service.sh sets
+# WATCHTOWER_SUPERVISED=1) the service manager restarts; skip the respawn watchdog.
+if [ "${WATCHTOWER_SUPERVISED:-0}" = "1" ]; then
+    echo "[Watchtower] Supervised by the service manager: resurrection watchdog not started."
+else
+    echo "[Watchtower] Engaging Kernel-Level Resurrection Watchdog..."
+    python3 watchtower_resurrection.py &
+    PIDS="$PIDS $!"
+fi
 
 echo "[Watchtower] Booting Master Topography Scraper Engine natively..."
 python3 watchtower_net_scraper.py &
