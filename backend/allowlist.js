@@ -388,16 +388,29 @@ function profileHasCapability(cap, profileId) {
 }
 
 /**
+ * IR P3-2 (Watchtower #6): action names are matched case-insensitively and
+ * without surrounding whitespace, so 'KILL' or ' Purge ' cannot slip past the
+ * purge-capability or audit-mode checks. The socket layer already rejects any
+ * action outside its exact lower-case set; this is a second line of defense.
+ * Host Group and profile names stay exact-match on purpose: a differently
+ * cased name is unmapped and denied (fail closed).
+ */
+function normalizeAction(action) {
+  return typeof action === 'string' ? action.trim().toLowerCase() : '';
+}
+
+/**
  * Purge verbs plus the configured destructive C2 list.
  * Non-strings are not destructive (caller rejects them before execution).
  */
 function isPurgeOrDestructiveAction(action) {
-  if (typeof action !== 'string' || action.length === 0) return false;
+  const a = normalizeAction(action);
+  if (a.length === 0) return false;
   const cfg = loadConfig();
   const list = (cfg.c2 && cfg.c2.destructive_actions) || [];
-  if (list.some((x) => x === action)) return true;
-  return action === 'purge' || action.startsWith('purge_') || action === 'wipe' || action === 'destroy' || action === 'clear'
-    || action === 'quarantine' || action === 'disable_user';
+  if (list.some((x) => normalizeAction(x) === a)) return true;
+  return a === 'purge' || a.startsWith('purge_') || a === 'wipe' || a === 'destroy' || a === 'clear'
+    || a === 'quarantine' || a === 'disable_user';
 }
 
 /**
@@ -426,10 +439,11 @@ function assertC2Command(cmd, deviceGroups, groupDB, profileId) {
   const policy = (groupDB && groupDB[group]) || {};
   const cfg = loadConfig();
   const action = typeof cmd.action === 'string' ? cmd.action : '';
+  const actionKey = normalizeAction(action);
 
   if (policy.WATCHTOWER_AUDIT_MODE === true) {
     const blocked = (cfg.c2 && cfg.c2.audit_blocked_actions) || ['kill'];
-    if (blocked.includes(action)) {
+    if (blocked.some((x) => normalizeAction(x) === actionKey)) {
       return makeDeny('DENY_C2_ACTION_NOT_ALLOWED', {
         action,
         reason: 'WATCHTOWER_AUDIT_MODE',
@@ -438,7 +452,7 @@ function assertC2Command(cmd, deviceGroups, groupDB, profileId) {
   }
 
   // ENABLE_ROLLBACK gate for rollback-class actions
-  if (action === 'rollback' && policy.ENABLE_ROLLBACK === false) {
+  if (actionKey === 'rollback' && policy.ENABLE_ROLLBACK === false) {
     return makeDeny('DENY_C2_ACTION_NOT_ALLOWED', { action, reason: 'ENABLE_ROLLBACK=false' });
   }
 
@@ -491,6 +505,7 @@ module.exports = {
   assertPolicyGroupWrite,
   assertC2Command,
   profileHasCapability,
+  normalizeAction,
   isPurgeOrDestructiveAction,
   assertPurgeCapability,
   sendHttpDeny,
