@@ -32,6 +32,8 @@ jobs:
         run: node frontend/test/xss-static.test.js
       - name: PowerShell sensor key trim (static)
         run: node backend/test/ps-sensor-key-trim.test.js
+      - name: Quarantine isolate_network hub IP (A13)
+        run: node backend/test/quarantine-hub-ip.test.js
       - name: Glass Pane security headers
         run: node frontend/test/csp-headers.test.js
       - name: Glass Pane operator session
