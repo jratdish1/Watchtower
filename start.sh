@@ -6,6 +6,14 @@ set -a
 source .env 2>/dev/null
 set +a
 
+# A17: bind loopback unless .env names one interface (e.g. the Tailscale IP).
+export WATCHTOWER_BIND_ADDRESS="${WATCHTOWER_BIND_ADDRESS:-127.0.0.1}"
+export WATCHTOWER_HONEYPOT_BIND="${WATCHTOWER_HONEYPOT_BIND:-127.0.0.1}"
+if [ "$WATCHTOWER_BIND_ADDRESS" = "0.0.0.0" ] || [ "$WATCHTOWER_BIND_ADDRESS" = "::" ]; then
+    echo "[!] REFUSED: WATCHTOWER_BIND_ADDRESS=$WATCHTOWER_BIND_ADDRESS binds every interface. Set one IP." >&2
+    exit 1
+fi
+
 # Activate Python environment
 source .venv/bin/activate
 cd core
@@ -13,17 +21,17 @@ PIDS=""
 
 if [ "$NODE_TYPE" == "HUB" ]; then
     echo "[Watchtower] Initiating Master Hub Boot Sequence..."
-    
+
     # Start Backend API
     (cd ../backend && node app.js) &
     API_PID=$!
-    
+
     # Start Frontend UI
     (cd ../frontend && node serve_ui.js) &
     UI_PID=$!
-    
+
     sleep 2
-    
+
     echo "[Watchtower] Starting C2 Beacon Listener & Hub Services..."
     python3 watchtower_beacon.py &
     PIDS="$PIDS $!"

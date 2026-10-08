@@ -36,6 +36,8 @@ jobs:
         run: node backend/test/ps-sensor-key-trim.test.js
       - name: Quarantine isolate_network hub IP (A13)
         run: node backend/test/quarantine-hub-ip.test.js
+      - name: Deploy defaults fail closed (A15-A17)
+        run: node backend/test/deploy-defaults.test.js
       - name: Glass Pane security headers
         run: node frontend/test/csp-headers.test.js
       - name: Glass Pane operator session
