@@ -63,9 +63,18 @@ def parse_hub_ip(hub_url):
     if not host:
         return None
     try:
-        return str(ipaddress.ip_address(host))
+        ip = ipaddress.ip_address(host)
     except ValueError:
         return None
+    # IPv6 zone ids ("fe80::1%x") carry free text into pf/netsh: refuse.
+    if getattr(ip, "scope_id", None):
+        return None
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    # A hub must be one real host, never "any", multicast, or broadcast.
+    if ip.is_unspecified or ip.is_multicast or (ip.is_reserved and not ip.is_loopback):
+        return None
+    return str(ip)
 
 def isolate_network(hub_url):
     hub_ip = parse_hub_ip(hub_url)

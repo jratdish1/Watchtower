@@ -3,6 +3,8 @@
 // target injected extra pf rules on macOS; 0.0.0.0/0 or a hostname turned
 // iptables/netsh isolation into allow-all. Runs the real Python module with
 // psutil stubbed and subprocess/platform patched (no command ever runs).
+// Also refuses IPv6 zone ids (free text after %), any/unspecified,
+// multicast, broadcast/reserved, and leading-zero or non-ASCII digits.
 const { spawnSync } = require('child_process');
 const path = require('path');
 
@@ -45,6 +47,9 @@ const GOOD = [
   ['https://100.64.0.1', '100.64.0.1'],
   ['  100.64.0.1  ', '100.64.0.1'],
   ['http://[fd7a:115c:a1e0::1]:4040', 'fd7a:115c:a1e0::1'],
+  ['::ffff:100.64.0.1', '100.64.0.1'],
+  ['127.0.0.1', '127.0.0.1'],
+  ['::1', '::1'],
 ];
 const BAD = [
   '100.64.0.1\npass out all',
@@ -58,6 +63,17 @@ const BAD = [
   '-j ACCEPT',
   '',
   'remoteip=any',
+  'fe80::1%#',
+  'fe80::1%en0',
+  'http://[fe80::1%25en0]:4040',
+  '0.0.0.0',
+  '::',
+  '::ffff:0.0.0.0',
+  '255.255.255.255',
+  '224.0.0.1',
+  'ff02::1',
+  '100.64.0.01',
+  '\uff11\uff10\uff10.64.0.1',
 ];
 const OSES = ['Darwin', 'Linux', 'Windows'];
 const cases = [];
