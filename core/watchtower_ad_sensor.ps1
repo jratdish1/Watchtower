@@ -14,6 +14,8 @@ if ([string]::IsNullOrWhiteSpace($ApiKey) -or $ApiKeyTrimmed -in @('WATCHTOWER_D
     Write-Error "[Watchtower] Refusing to start: WATCHTOWER_API_KEY is unset, empty, a public placeholder, or shorter than 32 characters."
     exit 1
 }
+# Send the validated (trimmed) value; a padded env value must not 401.
+$ApiKey = $ApiKeyTrimmed
 $Hostname = $env:COMPUTERNAME
 
 $IngestUrl = "http://${HubIP}:${HubApiPort}/api/v2/ingest/threat"
