@@ -39,12 +39,27 @@ function applySecurityHeaders(res, nonce) {
     }
 }
 
+// IR P3-3 (Watchtower #6): WATCHTOWER_UI_COOKIE_SECURE=0 (or false) is an
+// intentional opt-out that drops the Secure flag. It exists for plain-HTTP
+// loopback or lab use only. See SECURITY.md "Glass Pane UI settings".
 function cookieSecure() {
     const flag = process.env.WATCHTOWER_UI_COOKIE_SECURE;
     if (flag === '1' || flag === 'true') return true;
     if (flag === '0' || flag === 'false') return false;
     const origin = process.env.WATCHTOWER_UI_ORIGIN || '';
     return origin.startsWith('https://');
+}
+
+function cookieSecureOptOutWarning() {
+    const flag = process.env.WATCHTOWER_UI_COOKIE_SECURE;
+    if (flag !== '0' && flag !== 'false') return null;
+    const origin = process.env.WATCHTOWER_UI_ORIGIN || '';
+    if (origin.startsWith('https://')) {
+        return '[Watchtower V2 Glass Pane] WARNING: WATCHTOWER_UI_COOKIE_SECURE=' + flag
+            + ' overrides an https:// WATCHTOWER_UI_ORIGIN. The session cookie will not carry Secure.';
+    }
+    return '[Watchtower V2 Glass Pane] NOTICE: WATCHTOWER_UI_COOKIE_SECURE=' + flag
+        + ' is set. The session cookie will not carry Secure (intended for plain-HTTP loopback only).';
 }
 
 function sessionCookie(token) {
@@ -353,6 +368,23 @@ const BROWSER_V2 = new Set([
     '/api/v2/policies/update',
 ]);
 
+// IR P3-1 (Watchtower #6): one canonical spelling per path.
+// A '%' must start a valid %XX escape, and an escape may not encode an
+// unreserved character (RFC 3986 2.3: A-Z a-z 0-9 - . _ ~). '/api/%76%32/x'
+// is a second spelling of '/api/v2/x'; the proxy refuses it (403) so the
+// /api/v2 browser allowlist cannot be sidestepped if a router ever decodes
+// before matching.
+// Reserved or non-ASCII escapes such as %20 are still forwarded as-is.
+function canonicalPercentEncoding(pathname) {
+    if (/%(?![0-9A-Fa-f]{2})/.test(pathname)) return false;
+    const escapes = pathname.match(/%[0-9A-Fa-f]{2}/g) || [];
+    for (const esc of escapes) {
+        const ch = String.fromCharCode(parseInt(esc.slice(1), 16));
+        if (/[A-Za-z0-9\-._~]/.test(ch)) return false;
+    }
+    return true;
+}
+
 function requestTarget(urlPath) {
     const raw = String(urlPath || '');
     if (!raw.startsWith('/') || raw.includes('#') || raw.includes('\\') || /[\u0000-\u001F\u007F]/.test(raw)) return null;
@@ -374,6 +406,7 @@ function requestTarget(urlPath) {
 }
 
 function proxyPathAllowed(pathname) {
+    if (!canonicalPercentEncoding(pathname)) return false;
     const compared = pathname.toLowerCase();
     if (compared === '/socket.io' || compared.startsWith('/socket.io/')) return true;
     if (compared === '/api/v2' || compared.startsWith('/api/v2/')) return BROWSER_V2.has(compared);
@@ -443,6 +476,7 @@ const server = http.createServer((req, res) => {
 function socketIoUpgradeTarget(urlPath) {
     const target = requestTarget(urlPath);
     if (!target) return { status: 400 };
+    if (!canonicalPercentEncoding(target.pathname)) return { status: 403 };
     const compared = target.pathname.toLowerCase();
     if (compared === '/socket.io' || compared.startsWith('/socket.io/')) {
         return { forward: target.pathname + target.query };
@@ -519,5 +553,7 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(port, bindAddress, () => {
     console.log('[Watchtower V2 Glass Pane] Operator API key loaded from environment');
+    const secureOptOut = cookieSecureOptOutWarning();
+    if (secureOptOut) console.warn(secureOptOut);
     console.log(`[Watchtower V2 Glass Pane] UI Server listening on http://${bindAddress}:${port}`);
 });

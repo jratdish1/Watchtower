@@ -30,3 +30,5 @@ jobs:
         run: node frontend/test/ui-auth.test.js
       - name: Step 5 isolated harness
         run: node frontend/test/step5-harness.test.js
+      - name: IR P3 hardening (percent-encoding, action case, cookie opt-out)
+        run: node frontend/test/ir-p3-hardening.test.js
