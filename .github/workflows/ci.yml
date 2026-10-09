@@ -42,6 +42,8 @@ jobs:
         run: node backend/test/service-owner.test.js
       - name: Hub API URL reachable by sensors (A22)
         run: node backend/test/api-url.test.js
+      - name: A23-A25 AI bridge verdict, service hardening, supervised child watch
+        run: node backend/test/bridge-hardening.test.js
       - name: Glass Pane security headers
         run: node frontend/test/csp-headers.test.js
       - name: Glass Pane operator session

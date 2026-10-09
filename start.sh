@@ -70,8 +70,27 @@ PIDS="$PIDS $!"
 
 echo "[Watchtower] All systems operational. Press Ctrl+C to shutdown."
 if [ "$NODE_TYPE" == "HUB" ]; then
-    trap "kill $API_PID $UI_PID $PIDS; exit" INT TERM
+    ALL_PIDS="$API_PID $UI_PID $PIDS"
 else
-    trap "kill $PIDS; exit" INT TERM
+    ALL_PIDS="$PIDS"
+fi
+trap "kill $ALL_PIDS 2>/dev/null; exit" INT TERM
+
+# A25: under a service manager there is no resurrection watchdog (A20), so a
+# single dead sensor would stay dead while `wait` blocks on the rest. Watch every
+# child; if any exits, stop the group and exit 1 so systemd/launchd restarts it.
+# Portable to macOS /bin/bash 3.2 (no `wait -n`).
+if [ "${WATCHTOWER_SUPERVISED:-0}" = "1" ]; then
+    while true; do
+        for p in $ALL_PIDS; do
+            if ! kill -0 "$p" 2>/dev/null; then
+                echo "[Watchtower] Child $p exited under supervision; stopping group for a clean restart." >&2
+                kill $ALL_PIDS 2>/dev/null
+                exit 1
+            fi
+        done
+        sleep 5 &
+        wait $!
+    done
 fi
 wait
