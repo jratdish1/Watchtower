@@ -11,7 +11,7 @@
 #   git checkout --detach <EXACT_REVIEWED_SHA>
 #   npm ci --ignore-scripts --prefix backend
 #   npm ci --ignore-scripts --prefix frontend
-#   .venv/bin/pip install -r requirements.txt
+#   .venv/bin/pip install --require-hashes -r requirements.txt
 #   then restart the service.
 echo "[Watchtower Secure Updater] REFUSED: signed-update verification is not implemented." >&2
 echo "Use the exact-SHA git procedure documented at the top of this script." >&2

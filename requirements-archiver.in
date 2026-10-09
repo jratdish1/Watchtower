@@ -1,0 +1,10 @@
+# OPTIONAL: only for core/watchtower_archiver.py (standalone, not started by start.sh).
+# Heavy AI stack (pulls torch). Install AFTER requirements.txt, into the same venv:
+#   .venv/bin/pip install --require-hashes -r requirements-archiver.txt
+# Regenerate the locked file after any change (A26):
+#   uv pip compile requirements-archiver.in --universal --python-version 3.10 \
+#     --generate-hashes --exclude-newer <UTC timestamp 14+ days old, e.g. 2026-09-24T00:00:00Z> -o requirements-archiver.txt
+-c requirements.txt
+sentence-transformers>=5.6.0
+pyarrow>=23.0.1
+lancedb

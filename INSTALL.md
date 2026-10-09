@@ -26,6 +26,8 @@ chmod +x setup.sh
 5. To boot the system, execute `./start.sh` (it reads `NODE_TYPE` from `.env` for Hub or Edge).
 6. Network: `start.sh` binds the API to `127.0.0.1` unless `WATCHTOWER_BIND_ADDRESS` names one interface, and refuses `0.0.0.0` (use the Tailscale IP for a fleet hub). The honeypot binds `WATCHTOWER_HONEYPOT_BIND` (default `127.0.0.1`).
 7. Updates: `secure_update.sh` refuses to run (no real signature check yet). Update by checking out an exact reviewed SHA - see the header of that script.
+8. Python dependencies are hash-locked (A26). Setup runs `pip install --require-hashes -r requirements.txt`. To change a pin, edit `requirements.in` and regenerate with the `uv pip compile` line at the top of that file.
+9. Optional archiver (`core/watchtower_archiver.py`, not started by `start.sh`, needs Python 3.10+, pulls torch): `.venv/bin/pip install --require-hashes -r requirements-archiver.txt`.
 
 ---
 
