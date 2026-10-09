@@ -146,13 +146,17 @@ function startRig(supervised) {
   return { d, pids, env };
 }
 // Zombie-aware: a reaped-late child (state Z) is dead, even though kill -0 succeeds.
+// The test's own spawned start.sh stays a zombie while spawnSync blocks the event
+// loop, so this matters. Linux: /proc stat. macOS (no /proc): `ps -o stat=`.
 const alive = (pid) => {
   try {
     const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
     return st.slice(st.lastIndexOf(')') + 2, st.lastIndexOf(')') + 3) !== 'Z';
   } catch (e) {
     if (fs.existsSync('/proc/self/stat')) return false;
-    try { process.kill(pid, 0); return true; } catch (e2) { return false; }
+    const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' });
+    const stat = (ps.stdout || '').trim();
+    return stat !== '' && !stat.startsWith('Z');
   }
 };
 const waitDead = (pid, ms) => { const end = Date.now() + ms; while (Date.now() < end) { if (!alive(pid)) return true; spawnSync('sleep', ['0.2']); } return !alive(pid); };
