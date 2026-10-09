@@ -60,3 +60,5 @@ jobs:
         env:
           WT_PY: /tmp/wt-venv/bin/python
         run: node backend/test/python-deps.test.js
+      - name: A27 API binds loopback by default, refuses every-interface binds, fails loud on listen error
+        run: node backend/test/api-bind.test.js
