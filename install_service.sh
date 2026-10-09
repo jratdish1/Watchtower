@@ -38,8 +38,17 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     <string>$DIR</string>
     <key>RunAtLoad</key>
     <true/>
+    <!-- A24: restart on failure only (systemd Restart=on-failure parity) -->
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <!-- A24: Umask 63 = 077, logs and data owner-only -->
+    <key>Umask</key>
+    <integer>63</integer>
     <key>StandardOutPath</key>
     <string>$DIR/data/${SERVICE_NAME}.log</string>
     <key>StandardErrorPath</key>
@@ -66,6 +75,20 @@ Environment=WATCHTOWER_SUPERVISED=1
 ExecStart=$DIR/$TARGET_SCRIPT
 Restart=on-failure
 RestartSec=5
+# A24 phase 1 hardening: only directives that break no Watchtower feature.
+# NoNewPrivileges is NOT set here: isolate_network calls sudo. VETS decision A24b.
+ProtectSystem=full
+ReadWritePaths=$DIR
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

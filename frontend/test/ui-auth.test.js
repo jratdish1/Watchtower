@@ -298,6 +298,17 @@ function cookiePair(res) {
     ui.child.kill('SIGTERM');
   }
 
+  // macOS lo0 carries only 127.0.0.1 unless an alias is added, so 127.0.0.2
+  // fails with EADDRNOTAVAIL. Skip (not pass) the opt-in bind block there;
+  // Linux CI still runs it. Enable on a Mac: sudo ifconfig lo0 alias 127.0.0.2 up
+  const altBindable = await new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', (err) => resolve(err.code !== 'EADDRNOTAVAIL'));
+    probe.listen(0, '127.0.0.2', () => probe.close(() => resolve(true)));
+  });
+  if (!altBindable) {
+    console.log('# SKIP opt-in bind (3 checks): 127.0.0.2 not bindable on this host (macOS lo0)');
+  } else {
   const optPort = await freePort();
   const opted = spawnUi(optPort, { WATCHTOWER_UI_BIND_ADDRESS: '127.0.0.2' }, '127.0.0.2');
   try {
@@ -314,6 +325,7 @@ function cookiePair(res) {
     check('opt-in bind serves /login', onOpt.status === 200, String(onOpt.status));
   } finally {
     opted.child.kill('SIGTERM');
+  }
   }
 
   const api = await startApi({ WATCHTOWER_API_KEY: TEST_OPERATOR_KEY });

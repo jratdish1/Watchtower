@@ -77,7 +77,10 @@ def _analyze_file(event_type, filepath, entropy=None):
     }
 
     req = urllib.request.Request(LM_STUDIO_URL, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
-    
+
+    # A23: bind ai_text before the request so the except path can never raise
+    # UnboundLocalError when the inference server is offline (verdict was lost).
+    ai_text = ""
     try:
         
         response = urllib.request.urlopen(req, timeout=120) # Extended timeout to allow deep thinking
@@ -99,9 +102,14 @@ def _analyze_file(event_type, filepath, entropy=None):
         if ai_text.startswith("```"): ai_text = ai_text[3:]
         if ai_text.endswith("```"): ai_text = ai_text[:-3]
         
-        return json.loads(ai_text.strip())
+        parsed = json.loads(ai_text.strip())
+        # A23: only a dict with a known verdict is trusted; anything else is UNKNOWN.
+        if not isinstance(parsed, dict) or parsed.get("verdict") not in ("SAFE", "SUSPICIOUS", "MALICIOUS"):
+            return {"verdict": "UNKNOWN", "reason": "AI Bridge: model returned no valid verdict."}
+        parsed["reason"] = str(parsed.get("reason", ""))[:500]
+        return parsed
     except Exception as e:
-        return {"verdict": "ERROR", "reason": f"AI Bridge failure: {e}. Raw Text: {ai_text}"}
+        return {"verdict": "ERROR", "reason": f"AI Bridge failure: {type(e).__name__}: {str(e)[:200]}. Raw Text: {ai_text[:300]}"}
 
 if __name__ == "__main__":
     import sys
