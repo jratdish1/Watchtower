@@ -32,14 +32,51 @@ function run(bind) {
   r = await run('127.0.0.1');
   check('127.0.0.1 -> listens on 127.0.0.1', r.listened === '127.0.0.1', JSON.stringify(r).slice(0, 200));
   r = await run('192.0.2.1');  // TEST-NET-1, never assigned to this host
-  check('unbindable IP -> exit 1 + FATAL, not a silent exit 0', r.code === 1 && /\[FATAL\] API cannot listen/.test(r.out) && !r.listened, JSON.stringify(r).slice(0, 200));
+  check('unbindable IP -> exit 1 + FATAL, not a silent exit 0', r.code === 1 && /\[FATAL\] API cannot listen/.test(r.out) && !r.listened && !/listening on/i.test(r.out), JSON.stringify(r).slice(0, 200));
   for (const bad of ['0.0.0.0', '::', '::0', '0:0:0:0:0:0:0:0', '00.0.0.0', '::ffff:0.0.0.0', 'localhost', 'evil.example', '10.0.0.0/8', '127.0.0.1 0.0.0.0', '999.1.1.1']) {
     r = await run(bad);
-    check(`refuses ${JSON.stringify(bad)}`, r.code === 1 && /\[FATAL\] WATCHTOWER_BIND_ADDRESS/.test(r.out) && !r.listened, JSON.stringify(r).slice(0, 200));
+    check(`refuses ${JSON.stringify(bad)}`, r.code === 1 && /\[FATAL\] WATCHTOWER_BIND_ADDRESS/.test(r.out) && !r.listened && !/listening on/i.test(r.out), JSON.stringify(r).slice(0, 200));
+  }
+  // P2-1 (Codex CLI G2 seat): EADDRINUSE path. Port held by another socket -> no listening claim, retry logged,
+  // then the app binds by itself once the port is free (retry loop works, no crash, no silent exit).
+  {
+    const net = require('net');
+    const busyPort = port++;
+    const blocker = net.createServer();
+    await new Promise((ok) => blocker.listen(busyPort, '127.0.0.1', ok));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-a27-busy-'));
+    const env = { PATH: process.env.PATH, HOME: process.env.HOME, WATCHTOWER_API_KEY: KEY,
+      WATCHTOWER_API_PORT: String(busyPort), WATCHTOWER_DATA_DIR: tmp, WATCHTOWER_UPDATES_DIR: tmp,
+      WATCHTOWER_DB_PATH: path.join(tmp, 'wt.db'), AUTO_REMEDIATE: 'false', WATCHTOWER_BIND_ADDRESS: '127.0.0.1' };
+    const p = spawn(process.execPath, ['app.js'], { cwd: path.join(__dirname, '..'), env });
+    let out = '', exited = null, freedAt = 0;
+    p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', (d) => { out += d; });
+    p.on('exit', (code) => { exited = code; });
+    const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+    await wait(1500);
+    const claimedWhileBusy = /listening on/i.test(out);
+    const retryLogged = new RegExp(`Port ${busyPort} is occupied`).test(out);
+    await new Promise((ok) => blocker.close(ok)); freedAt = out.length;
+    for (let i = 0; i < 20 && !/Server listening on http:\/\/127\.0\.0\.1:\d+/.test(out.slice(freedAt)) && exited === null; i++) await wait(250);
+    const recovered = /Server listening on http:\/\/127\.0\.0\.1:\d+/.test(out.slice(freedAt));
+    try { p.kill('SIGKILL'); } catch (e) {}
+    fs.rmSync(tmp, { recursive: true, force: true });
+    check('EADDRINUSE -> no listening claim while the port is held', !claimedWhileBusy, out.slice(0, 200));
+    check('EADDRINUSE -> retry is logged, process stays up', retryLogged && exited === null, JSON.stringify({ exited, out: out.slice(0, 200) }));
+    check('EADDRINUSE -> binds by itself once the port is free', recovered, out.slice(-200));
   }
   const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
   check("no '0.0.0.0' default left in app.js", !/WATCHTOWER_BIND_ADDRESS\s*\|\|\s*['"]0\.0\.0\.0['"]/.test(src));
   check('no pre-listen "Listening on" claim', !/API Gateway\] Listening on/.test(src));
+  {
+    // P2-2 (Codex CLI G2 seat): not one string. Every "listening on" claim in app.js (any case) must sit inside the
+    // server.listen(..., () => { ... }) callback, i.e. it is printed only after the socket is really bound.
+    const claims = [...src.matchAll(/listening on/gi)].map((m) => m.index);
+    const cb = src.indexOf('server.listen(port, BIND_ADDRESS, () => {');
+    const cbEnd = cb === -1 ? -1 : src.indexOf('\n});', cb);
+    check('every "listening on" claim is inside the listen callback', claims.length >= 1 && cb !== -1 && claims.every((i) => i > cb && i < cbEnd), JSON.stringify({ claims, cb, cbEnd }));
+  }
   console.log(`# api-bind: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
