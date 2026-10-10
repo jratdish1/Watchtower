@@ -11,12 +11,19 @@ for /f "delims=" %%A in (.env) do set %%A
 
 REM A17: bind loopback unless .env names one interface (e.g. the Tailscale IP).
 if "%WATCHTOWER_BIND_ADDRESS%"=="" set WATCHTOWER_BIND_ADDRESS=127.0.0.1
+if "%WATCHTOWER_UI_BIND_ADDRESS%"=="" set WATCHTOWER_UI_BIND_ADDRESS=127.0.0.1
 if "%WATCHTOWER_HONEYPOT_BIND%"=="" set WATCHTOWER_HONEYPOT_BIND=127.0.0.1
 if "%WATCHTOWER_BIND_ADDRESS%"=="0.0.0.0" goto refuse_bind
 if "%WATCHTOWER_BIND_ADDRESS%"=="::" goto refuse_bind
+REM A27: same quick pre-check for the UI. The authority is backend\bind_address.js (parsed address bytes).
+if "%WATCHTOWER_UI_BIND_ADDRESS%"=="0.0.0.0" goto refuse_ui_bind
+if "%WATCHTOWER_UI_BIND_ADDRESS%"=="::" goto refuse_ui_bind
 goto bind_ok
 :refuse_bind
 echo [!] REFUSED: WATCHTOWER_BIND_ADDRESS=%WATCHTOWER_BIND_ADDRESS% binds every interface. Set one IP.
+exit /b 1
+:refuse_ui_bind
+echo [!] REFUSED: WATCHTOWER_UI_BIND_ADDRESS=%WATCHTOWER_UI_BIND_ADDRESS% binds every interface. Set one IP.
 exit /b 1
 :bind_ok
 

@@ -8,11 +8,17 @@ set +a
 
 # A17: bind loopback unless .env names one interface (e.g. the Tailscale IP).
 export WATCHTOWER_BIND_ADDRESS="${WATCHTOWER_BIND_ADDRESS:-127.0.0.1}"
+export WATCHTOWER_UI_BIND_ADDRESS="${WATCHTOWER_UI_BIND_ADDRESS:-127.0.0.1}"
 export WATCHTOWER_HONEYPOT_BIND="${WATCHTOWER_HONEYPOT_BIND:-127.0.0.1}"
-if [ "$WATCHTOWER_BIND_ADDRESS" = "0.0.0.0" ] || [ "$WATCHTOWER_BIND_ADDRESS" = "::" ]; then
-    echo "[!] REFUSED: WATCHTOWER_BIND_ADDRESS=$WATCHTOWER_BIND_ADDRESS binds every interface. Set one IP." >&2
-    exit 1
-fi
+# Quick pre-check for the two common spellings only. The authority is backend/bind_address.js, which
+# backend/app.js and frontend/serve_ui.js run at startup on the parsed address bytes (A27).
+for bind_var in WATCHTOWER_BIND_ADDRESS WATCHTOWER_UI_BIND_ADDRESS; do
+    bind_val="${!bind_var}"
+    if [ "$bind_val" = "0.0.0.0" ] || [ "$bind_val" = "::" ]; then
+        echo "[!] REFUSED: $bind_var=$bind_val binds every interface. Set one IP." >&2
+        exit 1
+    fi
+done
 
 # Activate Python environment
 source .venv/bin/activate
