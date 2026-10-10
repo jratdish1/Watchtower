@@ -681,7 +681,8 @@ app.use((err, req, res, next) => {
 handleListenErrors(server, port, BIND_ADDRESS, 'API');
 
 server.listen(port, BIND_ADDRESS, () => {
-    console.log(`[Watchtower Command Center API] Server listening on http://${urlHost(BIND_ADDRESS)}:${port}`);
+    // Real bound port (differs from the configured one only when WATCHTOWER_API_PORT=0 asks the OS to choose).
+    console.log(`[Watchtower Command Center API] Server listening on http://${urlHost(BIND_ADDRESS)}:${server.address().port}`);
     console.log(`[Watchtower Command Center API] WebSocket Server attached.`);
     console.log(`[Watchtower Allowlist] enabled=${allowlist.isEnabled()} operator_profile=${allowlist.getOperatorProfileId() || '(unset → fail-closed)'}`);
 });

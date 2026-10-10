@@ -13,7 +13,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { keysEqual, operatorKeyProblem, MIN_OPERATOR_KEY_LENGTH } = require('../auth');
 const { ipAllowed } = require('../ip_allow');
-const { request, startApi, freePort, TEST_OPERATOR_KEY } = require('./spawn_api');
+const { request, startApi, TEST_OPERATOR_KEY } = require('./spawn_api');
 
 const KEY = TEST_OPERATOR_KEY;
 let passed = 0;
@@ -624,12 +624,11 @@ function auth(key) {
   const expectedData = path.resolve(repoRoot, 'data');
   const cwdData = path.resolve(backendDir, 'data');
   const cwdDataBefore = fs.existsSync(cwdData);
-  const dataPort = await freePort();
   const dataChild = spawn(process.execPath, [path.join(backendDir, 'app.js')], {
     cwd: backendDir,
     env: Object.assign({}, process.env, {
       WATCHTOWER_API_KEY: KEY,
-      WATCHTOWER_API_PORT: String(dataPort),
+      WATCHTOWER_API_PORT: '0',
       WATCHTOWER_BIND_ADDRESS: '127.0.0.1',
       WATCHTOWER_DATA_DIR: './data',
       WATCHTOWER_DB_PATH: path.join(os.tmpdir(), 'wt-cwd-db-' + process.pid + '.json'),

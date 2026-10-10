@@ -8,22 +8,10 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const net = require('net');
 const { spawn } = require('child_process');
 
 const REPO = path.join(__dirname, '../..');
 const TEST_OPERATOR_KEY = 'wt-test-operator-key-0123456789abcd';
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.listen(0, '127.0.0.1', () => {
-      const port = server.address().port;
-      server.close((err) => (err ? reject(err) : resolve(port)));
-    });
-    server.on('error', reject);
-  });
-}
 
 function request(port, method, urlPath, headers, body) {
   return new Promise((resolve, reject) => {
@@ -57,11 +45,12 @@ function request(port, method, urlPath, headers, body) {
 }
 
 async function startApi(extraEnv) {
-  const port = await freePort();
+  // G2 (Copilot WT #31): port 0, so the API asks the OS for a free port atomically (no probe-then-close race).
+  // The real port is read back from the "Server listening on" line.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-api-'));
   const env = Object.assign({}, process.env, {
     WATCHTOWER_API_KEY: TEST_OPERATOR_KEY,
-    WATCHTOWER_API_PORT: String(port),
+    WATCHTOWER_API_PORT: '0',
     WATCHTOWER_BIND_ADDRESS: '127.0.0.1',
     WATCHTOWER_DB_PATH: path.join(tmp, 'db.json'),
     WATCHTOWER_DATA_DIR: tmp,
@@ -81,6 +70,7 @@ async function startApi(extraEnv) {
 
   let log = '';
   let settled = false;
+  let port = 0;
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       if (settled) return;
@@ -90,9 +80,12 @@ async function startApi(extraEnv) {
     }, 8000);
     const take = (chunk) => {
       log += chunk.toString();
-      if (!settled && log.includes('Server listening')) {
+      const m = /Server listening on http:\/\/\S+:(\d+)/.exec(log);
+      if (!settled && m) {
         settled = true;
         clearTimeout(timer);
+        port = Number(m[1]);
+        if (!(port > 0)) { child.kill('SIGTERM'); reject(new Error('listen line has no real port\n' + log)); return; }
         resolve();
       }
     };
@@ -120,4 +113,4 @@ async function startApi(extraEnv) {
   };
 }
 
-module.exports = { REPO, TEST_OPERATOR_KEY, freePort, request, startApi };
+module.exports = { REPO, TEST_OPERATOR_KEY, request, startApi };

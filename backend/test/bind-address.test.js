@@ -49,25 +49,18 @@ for (const [raw, want] of [[undefined, 20], ['', 20], ['0', 0], ['1', 1], [' 5 '
 }
 check('urlHost leaves IPv4 alone', B.urlHost('127.0.0.1') === '127.0.0.1');
 
-function freePort() {
-  return new Promise((ok, bad) => {
-    const s = require('net').createServer();
-    s.once('error', bad);
-    s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); });
-  });
-}
-// Starts the real UI server. Resolves on its listen line or on close (stdout/stderr fully drained).
-async function runUi(bind) {
-  const port = await freePort();
+// Starts the real UI server on port 0 (the OS picks a free port atomically; no probe-then-close race).
+// Resolves on its listen line or on close (stdout/stderr fully drained).
+function runUi(bind) {
   return new Promise((resolve) => {
     const env = { PATH: process.env.PATH, HOME: process.env.HOME,
       WATCHTOWER_API_KEY: require('crypto').randomBytes(32).toString('hex'),
-      WATCHTOWER_UI_PORT: String(port), WATCHTOWER_API_PORT: '9' };
+      WATCHTOWER_UI_PORT: '0', WATCHTOWER_API_PORT: '9' };
     if (bind !== undefined) env.WATCHTOWER_UI_BIND_ADDRESS = bind;
     const p = spawn(process.execPath, [path.join(ROOT, 'frontend', 'serve_ui.js')], { cwd: ROOT, env });
     let out = '';
     const done = (r) => { clearTimeout(t); try { p.kill('SIGKILL'); } catch (e) {} resolve(r); };
-    p.stdout.on('data', (d) => { out += d; const m = /UI Server listening on http:\/\/(\S+):\d+/.exec(out); if (m) done({ listened: m[1], out }); });
+    p.stdout.on('data', (d) => { out += d; const m = /UI Server listening on http:\/\/(\S+):(\d+)/.exec(out); if (m) done({ listened: m[1], port: Number(m[2]), out }); });
     p.stderr.on('data', (d) => { out += d; });
     p.on('close', (code) => done({ code, out }));
     const t = setTimeout(() => done({ timeout: true, out }), 8000);
@@ -78,6 +71,7 @@ async function runUi(bind) {
   // Real UI process: default and explicit loopback listen.
   let r = await runUi(undefined);
   check('UI unset -> listens on 127.0.0.1', r.listened === '127.0.0.1', JSON.stringify(r).slice(0, 240));
+  check('UI listen line reports the real OS-chosen port (port 0 -> not ":0")', Number.isInteger(r.port) && r.port > 0, JSON.stringify(r).slice(0, 240));
   r = await runUi('127.0.0.1');
   check('UI 127.0.0.1 -> listens on 127.0.0.1', r.listened === '127.0.0.1', JSON.stringify(r).slice(0, 240));
   // Real UI process: every-interface and non-IP binds stop before listening, exit 1, one FATAL line.
@@ -170,13 +164,15 @@ async function runUi(bind) {
     const bound = await new Promise((ok) => { mock.once('error', () => ok(false)); mock.listen(0, apiBind, () => ok(true)); });
     if (!bound) return { skipped: true };
     const apiPort = mock.address().port;
-    const uiPort = await freePort();
     const key = require('crypto').randomBytes(32).toString('hex');
-    const env = { PATH: process.env.PATH, HOME: process.env.HOME, WATCHTOWER_API_KEY: key, WATCHTOWER_UI_PORT: String(uiPort),
+    const env = { PATH: process.env.PATH, HOME: process.env.HOME, WATCHTOWER_API_KEY: key, WATCHTOWER_UI_PORT: '0',
       WATCHTOWER_UI_BIND_ADDRESS: '127.0.0.1', WATCHTOWER_API_PORT: String(apiPort), WATCHTOWER_BIND_ADDRESS: apiBind };
     const ui = spawn(process.execPath, [path.join(ROOT, 'frontend', 'serve_ui.js')], { cwd: ROOT, env });
     let o = ''; ui.stdout.on('data', (d) => { o += d; }); ui.stderr.on('data', (d) => { o += d; });
     for (let t = Date.now(); !/UI Server listening on/.test(o) && Date.now() - t < 8000;) await new Promise((r) => setTimeout(r, 50));
+    const um = /UI Server listening on http:\/\/\S+:(\d+)/.exec(o);
+    if (!um) { try { ui.kill('SIGKILL'); } catch (e) {} await new Promise((r) => mock.close(r)); return { uiFailed: true, o: o.slice(0, 300) }; }
+    const uiPort = Number(um[1]);
     const req = (method, p, headers, body) => new Promise((resolve) => {
       const r = http.request({ hostname: '127.0.0.1', port: uiPort, path: p, method, headers }, (res) => {
         let d = ''; res.on('data', (c) => { d += c; }); res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: d })); });
@@ -195,6 +191,7 @@ async function runUi(bind) {
     const pr = await proxyRun(apiBind);
     if (pr.skipped) { console.log(`SKIP UI proxy -> API bound to ${apiBind}: this host cannot bind it (not counted)`); continue; }
     proxyRan++;
+    if (pr.uiFailed) { check(`UI proxy -> API bound to ${apiBind}: UI started`, false, JSON.stringify(pr)); continue; }
     check(`UI proxy -> API bound to ${apiBind}: login ok, request reaches the API (target follows WATCHTOWER_BIND_ADDRESS)`,
       pr.login === 200 && pr.got === 200 && !!pr.hit, JSON.stringify(pr).slice(0, 300));
     check(`UI proxy -> API bound to ${apiBind}: Host header "${wantHost('<port>')}", operator key added by the UI`,
@@ -250,4 +247,9 @@ async function runUi(bind) {
 
   console.log(`# bind-address: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
-})();
+})().catch((e) => {
+  // A harness error is one counted FAIL and exit 1, never an unhandled rejection.
+  console.log('FAIL harness error', e && e.stack ? e.stack : e);
+  console.log(`# bind-address: ${pass} passed, ${fail + 1} failed`);
+  process.exit(1);
+});

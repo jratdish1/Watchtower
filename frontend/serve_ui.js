@@ -563,5 +563,6 @@ server.listen(port, bindAddress, () => {
     console.log('[Watchtower V2 Glass Pane] Operator API key loaded from environment');
     const secureOptOut = cookieSecureOptOutWarning();
     if (secureOptOut) console.warn(secureOptOut);
-    console.log(`[Watchtower V2 Glass Pane] UI Server listening on http://${urlHost(bindAddress)}:${port}`);
+    // Real bound port (differs from the configured one only when WATCHTOWER_UI_PORT=0 asks the OS to choose).
+    console.log(`[Watchtower V2 Glass Pane] UI Server listening on http://${urlHost(bindAddress)}:${server.address().port}`);
 });
