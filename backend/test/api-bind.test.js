@@ -41,9 +41,15 @@ function run(bind) {
   // then the app binds by itself once the port is free (retry loop works, no crash, no silent exit).
   {
     const net = require('net');
-    const busyPort = port++;
     const blocker = net.createServer();
-    await new Promise((ok) => blocker.listen(busyPort, '127.0.0.1', ok));
+    const busyPort = await new Promise((resolve, reject) => {
+      const onError = (error) => reject(error);
+      blocker.once('error', onError);
+      blocker.listen(0, '127.0.0.1', () => {
+        blocker.removeListener('error', onError);
+        resolve(blocker.address().port);
+      });
+    });
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-a27-busy-'));
     const env = { PATH: process.env.PATH, HOME: process.env.HOME, WATCHTOWER_API_KEY: KEY,
       WATCHTOWER_API_PORT: String(busyPort), WATCHTOWER_DATA_DIR: tmp, WATCHTOWER_UPDATES_DIR: tmp,
