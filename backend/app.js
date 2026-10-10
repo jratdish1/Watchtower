@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const net = require('net');
 const crypto = require('crypto');
 const cors = require('cors'); 
 const fs = require('fs');
@@ -44,7 +45,17 @@ function resolveFromRepo(value, fallbackAbs) {
 // ------------------------------------------------------------------
 // CONFIGURATION
 // ------------------------------------------------------------------
-const BIND_ADDRESS = process.env.WATCHTOWER_BIND_ADDRESS || '0.0.0.0';
+// A27: same rule as start.sh (A17) and the UI: loopback by default, exactly one IP, never every interface.
+function requireBindAddress(raw) {
+    const v = (raw === undefined || String(raw).trim() === '') ? '127.0.0.1' : String(raw).trim();
+    const everyInterface = /^[0:]+$/.test(v) || /(^|:)0+\.0+\.0+\.0+$/.test(v);
+    if (net.isIP(v) === 0 || everyInterface) {
+        console.error(`[FATAL] WATCHTOWER_BIND_ADDRESS must be one IP address, not every interface or a hostname (got ${JSON.stringify(v.slice(0, 40))}).`);
+        process.exit(1);
+    }
+    return v;
+}
+const BIND_ADDRESS = requireBindAddress(process.env.WATCHTOWER_BIND_ADDRESS);
 const API_KEY = requireOperatorKey(process.env.WATCHTOWER_API_KEY);
 const DATA_DIR = resolveFromRepo(process.env.WATCHTOWER_DATA_DIR, path.join(__dirname, '..', 'data'));
 function dataFile(name) {
@@ -60,7 +71,7 @@ if (!PUBLIC_BASE_URL) {
 let c2Queue = Object.create(null);
 
 console.log('[Watchtower Command Center] Operator API key loaded from environment');
-console.log(`[Watchtower API Gateway] Listening on ${BIND_ADDRESS}:${port}`);
+console.log(`[Watchtower API Gateway] Configured to listen on ${BIND_ADDRESS}:${port}`);
 
 app.set('trust proxy', false);
 app.use(cors({ origin: UI_ORIGIN, methods: ['GET', 'POST', 'DELETE'] }));
@@ -680,6 +691,11 @@ server.on('error', (e) => {
             server.close();
             server.listen(port, BIND_ADDRESS);
         }, 3000);
+    } else {
+        // A27: any other listen error (bad address, no IPv6, permission) is fatal and loud.
+        // Exit non-zero so a service manager sees a failure, not a clean stop.
+        console.error(`[FATAL] API cannot listen on ${BIND_ADDRESS}:${port}: ${e.code || e.message}`);
+        process.exit(1);
     }
 });
 
