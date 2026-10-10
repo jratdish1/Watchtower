@@ -7,12 +7,21 @@ const fs = require('fs');
 let pass = 0, fail = 0;
 function check(name, ok, info) { if (ok) { pass++; console.log('PASS', name); } else { fail++; console.log('FAIL', name, info || ''); } }
 const KEY = require('crypto').randomBytes(32).toString('hex');
-let port = 44100;
-function run(bind) {
+// G2 P2 fix: no fixed port range. Ask the OS for a free port per run, so a busy port never sends a case
+// down the retry path by accident.
+function freePort() {
+  return new Promise((ok, bad) => {
+    const s = require('net').createServer();
+    s.once('error', bad);
+    s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); });
+  });
+}
+async function run(bind) {
+  const port = await freePort();
   return new Promise((resolve) => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-a27-'));
     const env = { PATH: process.env.PATH, HOME: process.env.HOME, WATCHTOWER_API_KEY: KEY,
-      WATCHTOWER_API_PORT: String(port++), WATCHTOWER_DATA_DIR: tmp, WATCHTOWER_UPDATES_DIR: tmp,
+      WATCHTOWER_API_PORT: String(port), WATCHTOWER_DATA_DIR: tmp, WATCHTOWER_UPDATES_DIR: tmp,
       WATCHTOWER_DB_PATH: path.join(tmp, 'wt.db'), AUTO_REMEDIATE: 'false' };
     if (bind !== undefined) env.WATCHTOWER_BIND_ADDRESS = bind;
     const p = spawn(process.execPath, ['app.js'], { cwd: path.join(__dirname, '..'), env });
@@ -20,7 +29,8 @@ function run(bind) {
     const done = (r) => { clearTimeout(t); try { p.kill('SIGKILL'); } catch (e) {} fs.rmSync(tmp, { recursive: true, force: true }); resolve(r); };
     p.stdout.on('data', (d) => { out += d; const m = /Server listening on http:\/\/(\S+):\d+/.exec(out); if (m) done({ listened: m[1], out }); });
     p.stderr.on('data', (d) => { out += d; });
-    p.on('exit', (code) => done({ code, out }));
+    // G2 P2 fix: 'close' fires after stdout/stderr are fully drained; 'exit' can fire first and lose the FATAL line.
+    p.on('close', (code) => done({ code, out }));
     const t = setTimeout(() => done({ timeout: true, out }), 8000);
   });
 }
@@ -33,9 +43,18 @@ function run(bind) {
   check('127.0.0.1 -> listens on 127.0.0.1', r.listened === '127.0.0.1', JSON.stringify(r).slice(0, 200));
   r = await run('192.0.2.1');  // TEST-NET-1, never assigned to this host
   check('unbindable IP -> exit 1 + FATAL, not a silent exit 0', r.code === 1 && /\[FATAL\] API cannot listen/.test(r.out) && !r.listened && !/listening on/i.test(r.out), JSON.stringify(r).slice(0, 200));
-  for (const bad of ['0.0.0.0', '::', '::0', '0:0:0:0:0:0:0:0', '00.0.0.0', '::ffff:0.0.0.0', 'localhost', 'evil.example', '10.0.0.0/8', '127.0.0.1 0.0.0.0', '999.1.1.1']) {
+  for (const bad of ['0.0.0.0', '::', '::0', '0:0:0:0:0:0:0:0', '00.0.0.0', '::ffff:0.0.0.0', 'localhost', 'evil.example', '10.0.0.0/8', '127.0.0.1 0.0.0.0', '999.1.1.1',
+    // G2 P1 (Copilot, WT #30): wildcard spellings the old text check let through.
+    '::ffff:0:0', '0:0:0:0:0:ffff:0:0', '::ffff:0000:0000', '::FFFF:0:0', '::%lo', '::0:0', '0::0']) {
     r = await run(bad);
     check(`refuses ${JSON.stringify(bad)}`, r.code === 1 && /\[FATAL\] WATCHTOWER_BIND_ADDRESS/.test(r.out) && !r.listened && !/listening on/i.test(r.out), JSON.stringify(r).slice(0, 200));
+  }
+  // G2 P1 side effect fixed: a real, specific IPv6 address that merely ends in 0.0.0.0 is not "every interface".
+  // It may not exist on this host (then the app exits with the normal "cannot listen" FATAL), but it must never be
+  // refused by the bind-address rule.
+  for (const ok of ['64:ff9b::0.0.0.0', '::1']) {
+    r = await run(ok);
+    check(`accepts specific ${JSON.stringify(ok)} (no bind-address refusal)`, !/\[FATAL\] WATCHTOWER_BIND_ADDRESS/.test(r.out), JSON.stringify(r).slice(0, 200));
   }
   // P2-1 (Codex CLI G2 seat): EADDRINUSE path. Port held by another socket -> no listening claim, retry logged,
   // then the app binds by itself once the port is free (retry loop works, no crash, no silent exit).
