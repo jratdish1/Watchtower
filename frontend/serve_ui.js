@@ -5,13 +5,17 @@ const crypto = require('crypto');
 const fs = require('fs');
 const { securityHeaders } = require('./security_headers');
 const { keysEqual, requireOperatorKey } = require('../backend/auth');
+const { requireBindAddress, urlHost, hostHeader, apiTargetHost, handleListenErrors } = require('../backend/bind_address');
 
 const app = express();
 const port = process.env.WATCHTOWER_UI_PORT || 8080;
-const bindAddress = process.env.WATCHTOWER_UI_BIND_ADDRESS || '127.0.0.1';
+// A27: same rule as the API (one shared module): loopback by default, one IP, never every interface.
+const bindAddress = requireBindAddress(process.env.WATCHTOWER_UI_BIND_ADDRESS, 'WATCHTOWER_UI_BIND_ADDRESS');
 const apiKey = requireOperatorKey(process.env.WATCHTOWER_API_KEY);
 const apiPort = process.env.WATCHTOWER_API_PORT || '3000';
-const apiHost = process.env.WATCHTOWER_API_HOST || '127.0.0.1';
+// A27: default to the address the API binds (same host), so a hub that binds the API to its Tailscale IP
+// keeps a working proxy. WATCHTOWER_API_HOST overrides.
+const apiHost = apiTargetHost(process.env);
 
 const sessions = new Map();
 const sessionSockets = new Map();
@@ -424,7 +428,7 @@ function proxyToApi(req, res) {
     const headers = Object.assign({}, req.headers);
     headers['x-api-key'] = apiKey;
     delete headers.cookie;
-    headers.host = apiHost + ':' + apiPort;
+    headers.host = hostHeader(apiHost, apiPort);
     const preq = http.request({
         hostname: apiHost,
         port: Number(apiPort),
@@ -511,7 +515,7 @@ server.on('upgrade', (req, socket, head) => {
         const headers = Object.assign({}, req.headers);
         headers['x-api-key'] = apiKey;
         delete headers.cookie;
-        headers.host = apiHost + ':' + apiPort;
+        headers.host = hostHeader(apiHost, apiPort);
         const preq = http.request({
             hostname: apiHost,
             port: Number(apiPort),
@@ -551,9 +555,13 @@ server.on('upgrade', (req, socket, head) => {
     }
 });
 
+// A27: same listen-error rule as the API (backend/bind_address.js): a busy port is retried a bounded number of
+// times, then exit 1; any other listen failure is one [FATAL] line and exit 1, never a raw stack trace.
+handleListenErrors(server, port, bindAddress, 'UI');
+
 server.listen(port, bindAddress, () => {
     console.log('[Watchtower V2 Glass Pane] Operator API key loaded from environment');
     const secureOptOut = cookieSecureOptOutWarning();
     if (secureOptOut) console.warn(secureOptOut);
-    console.log(`[Watchtower V2 Glass Pane] UI Server listening on http://${bindAddress}:${port}`);
+    console.log(`[Watchtower V2 Glass Pane] UI Server listening on http://${urlHost(bindAddress)}:${port}`);
 });

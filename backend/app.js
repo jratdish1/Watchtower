@@ -1,6 +1,5 @@
 const express = require('express');
 const http = require('http');
-const net = require('net');
 const crypto = require('crypto');
 const cors = require('cors'); 
 const fs = require('fs');
@@ -9,6 +8,7 @@ const { exec } = require('child_process');
 const { Server } = require('socket.io');
 const { keysEqual, operatorKeyProblem, requireOperatorKey } = require('./auth');
 const { ipAllowed } = require('./ip_allow');
+const { requireBindAddress, urlHost, handleListenErrors } = require('./bind_address');
 
 const app = express();
 const server = http.createServer(app);
@@ -45,42 +45,9 @@ function resolveFromRepo(value, fallbackAbs) {
 // ------------------------------------------------------------------
 // CONFIGURATION
 // ------------------------------------------------------------------
-// A27: same rule as start.sh (A17) and the UI: loopback by default, exactly one IP, never every interface.
-// G2 P1 fix: decide "every interface" on the parsed 16 address bytes, never on the spelling. A text check let
-// ::ffff:0:0, 0:0:0:0:0:ffff:0:0, ::ffff:0000:0000 (IPv4 wildcard) and ::%lo (IPv6 wildcard + zone) through,
-// and wrongly refused real addresses such as 64:ff9b::0.0.0.0. Unparseable input is refused (fail closed).
-function ipBytes(v) {
-    const s = String(v).split('%')[0]; // an IPv6 zone index (fe80::1%en0) does not change which address it is
-    if (net.isIPv4(s)) return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, ...s.split('.').map(Number)];
-    if (!net.isIPv6(s)) return null;
-    let t = s;
-    const m = /^(.*:)(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(t); // embedded IPv4 tail -> two hex groups
-    if (m) t = m[1] + ((+m[2] << 8) | +m[3]).toString(16) + ':' + ((+m[4] << 8) | +m[5]).toString(16);
-    const parts = t.split('::');
-    const left = parts[0] ? parts[0].split(':') : [];
-    const right = parts.length > 1 && parts[1] ? parts[1].split(':') : [];
-    const groups = [...left, ...Array(parts.length > 1 ? 8 - left.length - right.length : 0).fill('0'), ...right];
-    const h = groups.map((g) => parseInt(g, 16));
-    if (h.length !== 8 || h.some((x) => !(x >= 0 && x <= 0xffff))) return null;
-    return h.flatMap((x) => [x >> 8, x & 0xff]);
-}
-function isEveryInterface(v) {
-    const b = ipBytes(v);
-    if (!b) return true;
-    const zeroTail = b.slice(12).every((x) => x === 0);
-    const v4Mapped = b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff;
-    return b.every((x) => x === 0) || (v4Mapped && zeroTail);
-}
-function requireBindAddress(raw) {
-    const v = (raw === undefined || String(raw).trim() === '') ? '127.0.0.1' : String(raw).trim();
-    const everyInterface = isEveryInterface(v);
-    if (net.isIP(v) === 0 || everyInterface) {
-        console.error(`[FATAL] WATCHTOWER_BIND_ADDRESS must be one IP address, not every interface or a hostname (got ${JSON.stringify(v.slice(0, 40))}).`);
-        process.exit(1);
-    }
-    return v;
-}
-const BIND_ADDRESS = requireBindAddress(process.env.WATCHTOWER_BIND_ADDRESS);
+// A27: loopback by default, exactly one IP, never every interface. The rule lives in ./bind_address
+// (shared with frontend/serve_ui.js) so the API and the UI cannot drift apart.
+const BIND_ADDRESS = requireBindAddress(process.env.WATCHTOWER_BIND_ADDRESS, 'WATCHTOWER_BIND_ADDRESS');
 const API_KEY = requireOperatorKey(process.env.WATCHTOWER_API_KEY);
 const DATA_DIR = resolveFromRepo(process.env.WATCHTOWER_DATA_DIR, path.join(__dirname, '..', 'data'));
 function dataFile(name) {
@@ -96,7 +63,7 @@ if (!PUBLIC_BASE_URL) {
 let c2Queue = Object.create(null);
 
 console.log('[Watchtower Command Center] Operator API key loaded from environment');
-console.log(`[Watchtower API Gateway] Configured to listen on ${BIND_ADDRESS}:${port}`);
+console.log(`[Watchtower API Gateway] Configured to listen on ${urlHost(BIND_ADDRESS)}:${port}`);
 
 app.set('trust proxy', false);
 app.use(cors({ origin: UI_ORIGIN, methods: ['GET', 'POST', 'DELETE'] }));
@@ -709,23 +676,12 @@ app.use((err, req, res, next) => {
     res.status(code).json({ error });
 });
 
-server.on('error', (e) => {
-    if (e.code === 'EADDRINUSE') {
-        console.error(`[FATAL] Port ${port} is occupied. Retrying in 3 seconds...`);
-        setTimeout(() => {
-            server.close();
-            server.listen(port, BIND_ADDRESS);
-        }, 3000);
-    } else {
-        // A27: any other listen error (bad address, no IPv6, permission) is fatal and loud.
-        // Exit non-zero so a service manager sees a failure, not a clean stop.
-        console.error(`[FATAL] API cannot listen on ${BIND_ADDRESS}:${port}: ${e.code || e.message}`);
-        process.exit(1);
-    }
-});
+// A27: shared listen-error rule (backend/bind_address.js): a busy port is retried a bounded number of times
+// (WATCHTOWER_LISTEN_RETRY_MAX, default 20 x 3 s), then exit 1. Any other listen error exits 1 at once.
+handleListenErrors(server, port, BIND_ADDRESS, 'API');
 
 server.listen(port, BIND_ADDRESS, () => {
-    console.log(`[Watchtower Command Center API] Server listening on http://${BIND_ADDRESS}:${port}`);
+    console.log(`[Watchtower Command Center API] Server listening on http://${urlHost(BIND_ADDRESS)}:${port}`);
     console.log(`[Watchtower Command Center API] WebSocket Server attached.`);
     console.log(`[Watchtower Allowlist] enabled=${allowlist.isEnabled()} operator_profile=${allowlist.getOperatorProfileId() || '(unset → fail-closed)'}`);
 });
