@@ -41,9 +41,13 @@ function run(bind) {
   // then the app binds by itself once the port is free (retry loop works, no crash, no silent exit).
   {
     const net = require('net');
-    const busyPort = port++;
+    // Round 3 (Copilot finding): never a hard-coded port. Let the OS pick a free one (port 0) and reject on
+    // a bind error instead of hanging or crashing the whole test run.
     const blocker = net.createServer();
-    await new Promise((ok) => blocker.listen(busyPort, '127.0.0.1', ok));
+    const busyPort = await new Promise((ok, bad) => {
+      blocker.once('error', bad);
+      blocker.listen(0, '127.0.0.1', () => { blocker.removeListener('error', bad); ok(blocker.address().port); });
+    });
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-a27-busy-'));
     const env = { PATH: process.env.PATH, HOME: process.env.HOME, WATCHTOWER_API_KEY: KEY,
       WATCHTOWER_API_PORT: String(busyPort), WATCHTOWER_DATA_DIR: tmp, WATCHTOWER_UPDATES_DIR: tmp,
@@ -52,7 +56,9 @@ function run(bind) {
     let out = '', exited = null, freedAt = 0;
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', (d) => { out += d; });
-    p.on('exit', (code) => { exited = code; });
+    // Round 3 (Copilot finding): a signal kill reports code === null, which looked like "still running".
+    // Record the signal name instead so a crash by signal is never mistaken for "process stays up".
+    p.on('exit', (code, signal) => { exited = code !== null ? code : (signal || 'SIGNAL'); });
     const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
     // Event-driven, not fixed sleeps: wait (max 8 s) until the app reports the busy port, then free it.
     const busyRe = new RegExp(`Port ${busyPort} is occupied`);
@@ -83,7 +89,9 @@ function run(bind) {
     const m = /server\.listen\s*\([^)]*?,\s*(?:\(\s*\)\s*=>|function\s*\(\s*\))\s*\{/.exec(src);
     let cb = -1, cbEnd = -1;
     if (m) {
-      cb = m.index;
+      // Round 3 (Copilot finding): the lower bound is the callback's opening brace, not the start of
+      // server.listen(...), so a "listening on" inside the listen arguments is NOT counted as inside the callback.
+      cb = m.index + m[0].length - 1;
       for (let i = m.index + m[0].length, depth = 1; i < src.length; i++) {
         if (src[i] === '{') depth++;
         else if (src[i] === '}' && --depth === 0) { cbEnd = i; break; }
